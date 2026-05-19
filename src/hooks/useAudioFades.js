@@ -6,7 +6,7 @@ export function useAudioFades() {
   const { state, toast } = useApp()
 
   const processAudio = useCallback(async (videoFile, keepSegments, outputDuration) => {
-    const { audioMode, trmWin } = state.settings
+    const { audioMode } = state.settings
     if (audioMode === 'Mute') return null
 
     try {

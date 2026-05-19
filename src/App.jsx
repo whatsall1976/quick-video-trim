@@ -12,7 +12,7 @@ import { exportVideo, downloadBlob } from './utils/videoExport'
 
 function AppInner() {
   const { state, dispatch, toast } = useApp()
-  const { activePanel, video, trimSegments, settings, markers, isExporting, exportProgress, exportMessage, toasts } = state
+  const { activePanel, video, trimSegments, settings, isExporting, exportProgress, exportMessage, toasts } = state
 
   const videoRef = useRef(null)
   const canvasRef = useRef(null)

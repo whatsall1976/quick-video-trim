@@ -7,7 +7,6 @@ export default function ControlBar({ onClose }) {
   const { addMarker } = useMarkers()
 
   const SPEEDS = [1, 2, 4, 6, 8, 10]
-  const speedIdx = SPEEDS.indexOf(playback.playbackSpeed)
 
   const setSpeed = (spd) => dispatch({ type: 'SET_SPEED', payload: spd })
   const togglePlay = () => dispatch({ type: 'SET_PLAYING', payload: !playback.isPlaying })

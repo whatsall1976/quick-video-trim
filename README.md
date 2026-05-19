@@ -2,7 +2,7 @@
 
 Quick Video Trim is a lightweight, browser-based tool for **frame-level video trimming** with optional **face-detection-assisted marker placement**. The goal is to make “trim out the bad bits fast” feel like a small, local utility rather than a full NLE.
 
-This is a **local web app** (React + Vite). Video processing/export runs in the browser via **FFmpeg.wasm**; face detection uses **TensorFlow.js**.
+This is a **local web app** (React + Vite). Video processing/export runs in the browser via **FFmpeg.wasm**; face detection runs via a **local YOLO server** (Python + Ultralytics).
 
 ## What it does
 
@@ -27,7 +27,7 @@ This is a **local web app** (React + Vite). Video processing/export runs in the 
 
 - UI: React 18, Vite
 - Rendering: `<video>` + Canvas (for responsive scrubbing / frame display)
-- Detection: TensorFlow.js (BlazeFace model loader)
+- Detection: Local YOLO server (Ultralytics) + HTTP API
 - Export: `@ffmpeg/ffmpeg` + `@ffmpeg/util` (FFmpeg.wasm)
 
 ## Repo layout
@@ -54,4 +54,5 @@ Useful scripts:
 
 - Runs fully in the browser; large videos and WASM processing can be memory/CPU intensive.
 - FFmpeg.wasm core and ML model weights may be fetched at runtime (network required on first use).
+- YOLO weights may be downloaded on first server start (network required once).
 - This is intentionally not a general-purpose editor; the UX is optimized for “mark → trim → export”.

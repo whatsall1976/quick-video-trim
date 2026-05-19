@@ -98,7 +98,7 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
 
   async function detectFPS(vid) {
     if ('requestVideoFrameCallback' in vid) {
-      return new Promise((res, rej) => {
+      return new Promise((res) => {
         const timestamps = []
         const cb = (now, meta) => {
           timestamps.push(meta.mediaTime)

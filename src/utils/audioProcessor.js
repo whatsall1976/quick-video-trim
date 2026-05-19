@@ -15,7 +15,6 @@ export async function applyFadeEnvelopes(audioBuffer, keepSegments, fps) {
   gain.gain.setValueAtTime(0, 0)
 
   const frameDur = 1 / fps
-  const sr = audioBuffer.sampleRate
 
   for (const seg of keepSegments) {
     const startSec = seg.startFrame / fps

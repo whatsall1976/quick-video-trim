@@ -1,22 +1,47 @@
-import * as tf from '@tensorflow/tfjs'
+const DEFAULT_SERVER_URL = 'http://127.0.0.1:8765'
+const serverUrl = (import.meta?.env?.VITE_YOLO_SERVER_URL || DEFAULT_SERVER_URL).replace(/\/+$/, '')
 
-let model = null
+let serverReady = false
+let serverModel = null
 
 export async function loadModel() {
-  if (model) return model
-  const blazeface = await import('@tensorflow-models/blazeface')
-  model = await blazeface.load()
-  return model
+  if (serverReady) return { url: serverUrl, model: serverModel }
+  const res = await fetch(`${serverUrl}/health`, { method: 'GET' }).catch(() => null)
+  if (!res || !res.ok) throw new Error(`YOLO server not reachable at ${serverUrl}`)
+  const json = await res.json().catch(() => ({}))
+  if (!json.ok) throw new Error(`YOLO server error: ${json.error || 'unknown error'}`)
+  serverReady = true
+  serverModel = json.model || null
+  return { url: serverUrl, model: serverModel }
 }
 
-export async function detectFrame(imageSource) {
-  if (!model) throw new Error('Model not loaded')
-  const predictions = await model.estimateFaces(imageSource, false)
-  return predictions.map(p => {
-    const [x1, y1] = p.topLeft
-    const [x2, y2] = p.bottomRight
-    return { x: x1, y: y1, width: x2 - x1, height: y2 - y1, confidence: p.probability?.[0] ?? 1 }
+async function canvasToBlob(canvas) {
+  return await new Promise((res) => {
+    canvas.toBlob((b) => res(b), 'image/jpeg', 0.85)
   })
+}
+
+export async function detectFrame(imageSource, { conf = 0.05 } = {}) {
+  if (!serverReady) await loadModel()
+
+  const blob = await canvasToBlob(imageSource)
+  if (!blob) return []
+
+  const form = new FormData()
+  form.append('image', blob, 'frame.jpg')
+  const res = await fetch(`${serverUrl}/detect?conf=${encodeURIComponent(conf)}`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(`YOLO detect failed (${res.status})`)
+  const json = await res.json()
+  return (json.boxes || []).map(b => ({
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height,
+    confidence: b.confidence,
+  }))
 }
 
 export async function runDetection(videoEl, videoMeta, settings, onProgress, getAbort) {
@@ -24,6 +49,7 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
   const { confidenceThreshold, sizeJumpThreshold, faceMovementThreshold, qualityThreshold } = settings
   const confThresh = confidenceThreshold / 100
   const qualThresh = qualityThreshold / 100
+  const serverConf = Math.max(0.001, Math.min(confThresh, qualThresh, 0.25))
 
   const offscreen = document.createElement('canvas')
   offscreen.width = width || 640
@@ -46,7 +72,7 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
     ctx.drawImage(videoEl, 0, 0, offscreen.width, offscreen.height)
 
     let detected = []
-    try { detected = await detectFrame(offscreen) } catch { /* skip */ }
+    try { detected = await detectFrame(offscreen, { conf: serverConf }) } catch { /* skip */ }
     const best = detected.sort((a, b) => b.confidence - a.confidence)[0] ?? null
     faces.push({ frameNumber: f, face: best, allFaces: detected })
 

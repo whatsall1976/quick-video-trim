@@ -15,7 +15,7 @@ export function useYOLODetection(videoRef) {
     dispatch({ type: 'SET_DETECTION_PROGRESS', payload: 0 })
 
     try {
-      toast('Loading face detection model…', 'info', 4000)
+      toast('Connecting to local YOLO server…', 'info', 4000)
       await loadModel()
 
       const results = await runDetection(

@@ -15,13 +15,6 @@ async function getFFmpeg(onLog) {
   return ffmpeg
 }
 
-function formatTime(seconds) {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = (seconds % 60).toFixed(3)
-  return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.padStart(6,'0')}`
-}
-
 /**
  * Export trimmed video with audio processing.
  * @param {File} videoFile

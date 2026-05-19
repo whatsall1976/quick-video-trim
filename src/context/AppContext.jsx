@@ -29,7 +29,6 @@ const initialState = {
 function calcTrimSegments(markers, settings) {
   if (!markers.length) return []
   const { trmWin, trmIntv } = settings
-  const half = Math.floor(trmWin / 2)
 
   // Build raw windows per marker
   const windows = markers
