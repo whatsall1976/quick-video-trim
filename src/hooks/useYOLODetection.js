@@ -44,11 +44,6 @@ export function useYOLODetection(videoRef) {
       dispatch({ type: 'SET_DETECTION_RESULTS', payload: results })
       const total = results.thresholdCrossings.length + results.sizeJumps.length + results.movements.length
 
-      if (isTestRun) {
-        toast(`Test run complete: frames ${testStart}-${testEnd}, ${total} events, ${results.overlaps.length} overlaps.`, 'success', 5000)
-        return
-      }
-
       const newMarkers = []
       const addM = (frameNumber, reason, flagged = false, extra = {}) => {
         newMarkers.push({
@@ -84,7 +79,8 @@ export function useYOLODetection(videoRef) {
       ]
       dispatch({ type: 'SET_MARKERS', payload: merged })
 
-      toast(`Detection complete. ${total} events found, ${results.overlaps.length} overlaps flagged.`, 'success', 5000)
+      const label = isTestRun ? `Test detection frames ${testStart}-${testEnd}` : 'Detection'
+      toast(`${label} complete. ${total} events found, ${results.overlaps.length} overlaps flagged.`, 'success', 5000)
     } catch (err) {
       console.error(err)
       toast(`Detection failed: ${err.message}`, 'error', 6000)

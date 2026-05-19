@@ -100,16 +100,17 @@ function findOverlappingFacePair(boxes, config) {
   for (let i = 0; i < boxes.length; i += 1) {
     for (let j = i + 1; j < boxes.length; j += 1) {
       const metrics = boxMetrics(boxes[i], boxes[j])
-      const distinctCenters = centerDistance(boxes[i], boxes[j]) >= minFaceSide(boxes[i], boxes[j]) * config.distinctCenterRatio
+      const centerSeparationRatio = centerDistance(boxes[i], boxes[j]) / minFaceSide(boxes[i], boxes[j])
+      const distinctCenters = centerSeparationRatio >= config.distinctCenterRatio
       if (distinctCenters && (metrics.iou >= config.minIou || metrics.smallerOverlap >= config.minSmallerArea)) {
-        return { boxes: [boxes[i], boxes[j]], ...metrics }
+        return { boxes: [boxes[i], boxes[j]], centerSeparationRatio, ...metrics }
       }
     }
   }
   return null
 }
 
-function buildOverlapRanges(frames, sampleStep, totalFrames, config) {
+function buildOverlapRanges(frames, sampleStep, maxFrame, config) {
   const overlaps = []
   let inOverlap = null
 
@@ -117,8 +118,13 @@ function buildOverlapRanges(frames, sampleStep, totalFrames, config) {
     if (!inOverlap) return
     if (inOverlap.frames.length >= config.minSamples) {
       overlaps.push({
-        frameRange: [inOverlap.start, Math.min(totalFrames - 1, inOverlap.last + sampleStep - 1)],
+        frameRange: [inOverlap.start, Math.min(maxFrame, inOverlap.last + sampleStep - 1)],
         frames: inOverlap.frames,
+        sampleCount: inOverlap.frames.length,
+        maxIou: inOverlap.maxIou,
+        maxSmallFaceCoverage: inOverlap.maxSmallFaceCoverage,
+        maxCenterSeparation: inOverlap.maxCenterSeparation,
+        samples: inOverlap.samples,
       })
     }
     inOverlap = null
@@ -126,9 +132,28 @@ function buildOverlapRanges(frames, sampleStep, totalFrames, config) {
 
   for (const { frameNumber, overlap } of frames) {
     if (overlap) {
-      if (!inOverlap) inOverlap = { start: frameNumber, last: frameNumber, frames: [] }
+      if (!inOverlap) {
+        inOverlap = {
+          start: frameNumber,
+          last: frameNumber,
+          frames: [],
+          samples: [],
+          maxIou: 0,
+          maxSmallFaceCoverage: 0,
+          maxCenterSeparation: 0,
+        }
+      }
       inOverlap.last = frameNumber
       inOverlap.frames.push(frameNumber)
+      inOverlap.samples.push({
+        frameNumber,
+        iou: overlap.iou,
+        smallFaceCoverage: overlap.smallerOverlap,
+        centerSeparation: overlap.centerSeparationRatio,
+      })
+      inOverlap.maxIou = Math.max(inOverlap.maxIou, overlap.iou)
+      inOverlap.maxSmallFaceCoverage = Math.max(inOverlap.maxSmallFaceCoverage, overlap.smallerOverlap)
+      inOverlap.maxCenterSeparation = Math.max(inOverlap.maxCenterSeparation, overlap.centerSeparationRatio)
     } else {
       closeOverlap()
     }
@@ -168,6 +193,21 @@ function clampFrame(frame, totalFrames) {
   return clamp(Math.round(frame), 0, Math.max(0, totalFrames - 1))
 }
 
+function roundPercent(value) {
+  return Math.round(value * 100)
+}
+
+function confidenceStats(faces) {
+  const values = faces.map(({ face }) => face?.confidence).filter(Number.isFinite)
+  if (!values.length) return { min: 0, max: 0, avg: 0 }
+  const sum = values.reduce((total, value) => total + value, 0)
+  return {
+    min: roundPercent(Math.min(...values)),
+    max: roundPercent(Math.max(...values)),
+    avg: roundPercent(sum / values.length),
+  }
+}
+
 export async function runDetection(videoEl, videoMeta, settings, onProgress, getAbort, options = {}) {
   const { fps, totalFrames, width, height } = videoMeta
   const { confidenceThreshold, sizeJumpThreshold, faceMovementThreshold, qualityThreshold } = settings
@@ -189,8 +229,10 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
   const thresholdCrossings = []
   const sizeJumps = []
   const movements = []
+  const sampleDetails = []
+  const collectSampleDetails = options.mode === 'test'
   let prevArea = null, prevCx = null, prevCy = null, prevW = null
-  let wasAbove = null, wasAboveQual = null
+  let wasAbove = null, wasAboveQual = null, prevConf = null
   const sampleStep = Math.max(1, Math.floor(fps / 15))
   const scanFrameCount = Math.max(1, scanEndFrame - scanStartFrame + 1)
 
@@ -206,24 +248,60 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
     const sortedDetected = detected.sort((a, b) => b.confidence - a.confidence)
     const best = sortedDetected[0] ?? null
     const overlapFaces = dedupeFaceBoxes(sortedDetected)
+    const overlapPair = findOverlappingFacePair(overlapFaces, overlap)
     faces.push({
       frameNumber: f,
       face: best,
       allFaces: sortedDetected,
-      overlap: findOverlappingFacePair(overlapFaces, overlap),
+      overlap: overlapPair,
     })
 
     const conf = best?.confidence ?? 0
     const isAbove = conf > confThresh
     const isAboveQual = conf > qualThresh
+    if (collectSampleDetails) {
+      sampleDetails.push({
+        frameNumber: f,
+        confidence: roundPercent(conf),
+        detectedFaces: overlapFaces.length,
+        candidates: sortedDetected.length,
+        overlap: Boolean(overlapPair),
+        overlapIou: overlapPair ? roundPercent(overlapPair.iou) : null,
+        overlapSmallFaceCoverage: overlapPair ? roundPercent(overlapPair.smallerOverlap) : null,
+        overlapCenterSeparation: overlapPair ? roundPercent(overlapPair.centerSeparationRatio) : null,
+        box: best ? {
+          x: Math.round(best.x),
+          y: Math.round(best.y),
+          width: Math.round(best.width),
+          height: Math.round(best.height),
+        } : null,
+      })
+    }
 
-    if (wasAbove !== null && isAbove !== wasAbove)
-      thresholdCrossings.push({ type: 'onoff', direction: isAbove ? 'appear' : 'disappear', frameNumber: f })
+    if (wasAbove !== null && isAbove !== wasAbove) {
+      thresholdCrossings.push({
+        type: 'onoff',
+        direction: isAbove ? 'appear' : 'disappear',
+        frameNumber: f,
+        confidence: roundPercent(conf),
+        previousConfidence: roundPercent(prevConf ?? 0),
+        threshold: confidenceThreshold,
+      })
+    }
     wasAbove = isAbove
 
-    if (wasAboveQual !== null && isAboveQual !== wasAboveQual)
-      thresholdCrossings.push({ type: 'confidence', direction: isAboveQual ? 'recovery' : 'drop', frameNumber: f })
+    if (wasAboveQual !== null && isAboveQual !== wasAboveQual) {
+      thresholdCrossings.push({
+        type: 'confidence',
+        direction: isAboveQual ? 'recovery' : 'drop',
+        frameNumber: f,
+        confidence: roundPercent(conf),
+        previousConfidence: roundPercent(prevConf ?? 0),
+        threshold: qualityThreshold,
+      })
+    }
     wasAboveQual = isAboveQual
+    prevConf = conf
 
     if (best) {
       const area = best.width * best.height
@@ -231,19 +309,37 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
       const cy = best.y + best.height / 2
       if (prevArea !== null) {
         const pct = Math.abs(area - prevArea) / prevArea * 100
-        if (pct > sizeJumpThreshold) sizeJumps.push({ frameNumber: f, percentChange: Math.round(pct) })
+        if (pct > sizeJumpThreshold) {
+          sizeJumps.push({
+            frameNumber: f,
+            percentChange: Math.round(pct),
+            previousArea: Math.round(prevArea),
+            area: Math.round(area),
+            threshold: sizeJumpThreshold,
+          })
+        }
       }
       prevArea = area
       if (prevCx !== null && prevW) {
         const disp = Math.sqrt((cx - prevCx) ** 2 + (cy - prevCy) ** 2)
         const pct = (disp / prevW) * 100
-        if (pct > faceMovementThreshold) movements.push({ frameNumber: f, percentDisplacement: Math.round(pct) })
+        if (pct > faceMovementThreshold) {
+          movements.push({
+            frameNumber: f,
+            percentDisplacement: Math.round(pct),
+            displacementPixels: Math.round(disp),
+            faceWidth: Math.round(prevW),
+            threshold: faceMovementThreshold,
+          })
+        }
       }
       prevCx = cx; prevCy = cy; prevW = best.width
     } else { prevArea = null; prevCx = null; prevCy = null; prevW = null }
   }
 
-  const overlaps = buildOverlapRanges(faces, sampleStep, totalFrames, overlap)
+  const overlaps = buildOverlapRanges(faces, sampleStep, scanEndFrame, overlap)
+  const detectedFrames = faces.filter(({ face }) => face).length
+  const stats = confidenceStats(faces)
   onProgress?.(1)
 
   return {
@@ -255,5 +351,25 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
     frameRange: [scanStartFrame, scanEndFrame],
     scannedFrames: faces.length,
     runMode: options.mode ?? 'full',
+    details: {
+      sampleStep,
+      detectedFrames,
+      missingFrames: faces.length - detectedFrames,
+      framesWithCandidates: faces.filter(({ allFaces }) => allFaces.length > 1).length,
+      framesWithOverlaps: faces.filter(({ overlap }) => overlap).length,
+      confidence: stats,
+      thresholds: {
+        confidenceThreshold,
+        qualityThreshold,
+        sizeJumpThreshold,
+        faceMovementThreshold,
+        overlapNmsIou: roundPercent(overlap.nmsIou),
+        overlapIoUThreshold: roundPercent(overlap.minIou),
+        overlapSmallFaceCoverage: roundPercent(overlap.minSmallerArea),
+        overlapCenterSeparation: roundPercent(overlap.distinctCenterRatio),
+        overlapMinSamples: overlap.minSamples,
+      },
+      samples: sampleDetails,
+    },
   }
 }

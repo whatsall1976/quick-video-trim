@@ -85,7 +85,24 @@ export default function DetectorPanel({ videoRef, onClose }) {
   }
 
   const { thresholdCrossings = [], sizeJumps = [], movements = [], overlaps = [] } = detectionResults
-  const hasDetectionResults = thresholdCrossings.length > 0 || sizeJumps.length > 0 || movements.length > 0 || overlaps.length > 0
+  const details = detectionResults.details
+  const hasRunResults = Array.isArray(detectionResults.frameRange)
+  const hasDetectionResults = hasRunResults || thresholdCrossings.length > 0 || sizeJumps.length > 0 || movements.length > 0 || overlaps.length > 0
+  const pct = (value) => Number.isFinite(value) ? `${Math.round(value)}%` : '-'
+  const ratioPct = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-'
+  const goToFrame = (frameNumber) => {
+    dispatch({ type: 'SET_FRAME', payload: frameNumber })
+    dispatch({ type: 'SET_PLAYING', payload: false })
+  }
+  const detailRowStyle = {
+    fontSize: 11,
+    color: 'var(--text-secondary)',
+    padding: '6px 8px',
+    background: 'var(--bg-elevated)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)',
+    lineHeight: 1.5,
+  }
 
   return (
     <>
@@ -202,6 +219,84 @@ export default function DetectorPanel({ videoRef, onClose }) {
                 </div>
               ))}
             </div>
+            {details && (
+              <>
+                <div className="section-divider">Detection Details</div>
+                <div style={{ ...detailRowStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <div>Samples: {detectionResults.scannedFrames}</div>
+                  <div>Step: {details.sampleStep} frames</div>
+                  <div>Detected: {details.detectedFrames}</div>
+                  <div>Missing: {details.missingFrames}</div>
+                  <div>Candidate frames: {details.framesWithCandidates}</div>
+                  <div>Overlap frames: {details.framesWithOverlaps}</div>
+                  <div>Conf min/avg/max: {pct(details.confidence?.min)}/{pct(details.confidence?.avg)}/{pct(details.confidence?.max)}</div>
+                  <div>Quality threshold: {pct(details.thresholds?.qualityThreshold)}</div>
+                </div>
+              </>
+            )}
+
+            {thresholdCrossings.length > 0 && (
+              <>
+                <div className="section-divider">Face Event Frames</div>
+                {thresholdCrossings.map((event, index) => (
+                  <div key={`${event.type}-${event.frameNumber}-${index}`} style={detailRowStyle}>
+                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(event.frameNumber)} title="Jump to frame">⤷</button>
+                    Frame {event.frameNumber}: {event.direction} / {event.type}, confidence {pct(event.previousConfidence)} to {pct(event.confidence)}, threshold {pct(event.threshold)}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {sizeJumps.length > 0 && (
+              <>
+                <div className="section-divider">Size Jump Frames</div>
+                {sizeJumps.map((jump, index) => (
+                  <div key={`${jump.frameNumber}-${index}`} style={detailRowStyle}>
+                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(jump.frameNumber)} title="Jump to frame">⤷</button>
+                    Frame {jump.frameNumber}: {pct(jump.percentChange)} area change, {jump.previousArea} to {jump.area}, threshold {pct(jump.threshold)}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {movements.length > 0 && (
+              <>
+                <div className="section-divider">Movement Frames</div>
+                {movements.map((move, index) => (
+                  <div key={`${move.frameNumber}-${index}`} style={detailRowStyle}>
+                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(move.frameNumber)} title="Jump to frame">⤷</button>
+                    Frame {move.frameNumber}: {pct(move.percentDisplacement)} movement, {move.displacementPixels}px / {move.faceWidth}px face width, threshold {pct(move.threshold)}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {overlaps.length > 0 && (
+              <>
+                <div className="section-divider">Overlap Ranges</div>
+                {overlaps.map((overlap, index) => (
+                  <div key={`${overlap.frameRange?.[0]}-${index}`} style={detailRowStyle}>
+                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(overlap.frameRange[0])} title="Jump to frame">⤷</button>
+                    Frames {overlap.frameRange[0]}-{overlap.frameRange[1]}: {overlap.sampleCount ?? overlap.frames?.length ?? 0} samples, max IoU {ratioPct(overlap.maxIou)}, small-face coverage {ratioPct(overlap.maxSmallFaceCoverage)}, center separation {ratioPct(overlap.maxCenterSeparation)}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {details?.samples?.length > 0 && (
+              <>
+                <div className="section-divider">Sample Frames</div>
+                <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {details.samples.map(sample => (
+                    <div key={sample.frameNumber} style={detailRowStyle}>
+                      <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(sample.frameNumber)} title="Jump to frame">⤷</button>
+                      Frame {sample.frameNumber}: conf {pct(sample.confidence)}, faces {sample.detectedFaces}, candidates {sample.candidates}
+                      {sample.overlap && `, overlap IoU ${pct(sample.overlapIou)}, coverage ${pct(sample.overlapSmallFaceCoverage)}, separation ${pct(sample.overlapCenterSeparation)}`}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
 
