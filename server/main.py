@@ -14,11 +14,21 @@ from pydantic import BaseModel
 from PIL import Image
 
 try:
-  from scenedetect import detect, AdaptiveDetector, ContentDetector
+  from transnetv2_pytorch import TransNetV2
+
+  _transnet_model = None
+
+  def get_transnet():
+    global _transnet_model
+    if _transnet_model is None:
+      _transnet_model = TransNetV2()
+    return _transnet_model
 
   TRANSITION_DETECTOR_AVAILABLE = True
+  TRANSITION_DETECTOR_NAME = "TransNetV2"
 except ImportError:
   TRANSITION_DETECTOR_AVAILABLE = False
+  TRANSITION_DETECTOR_NAME = "none"
 
 APP_HOST = os.getenv("YOLO_SERVER_HOST", "127.0.0.1")
 APP_PORT = int(os.getenv("YOLO_SERVER_PORT", "8765"))
@@ -432,72 +442,62 @@ async def detect_transitions_frames(
   startFrame: int = Form(0),
   fps: int = Form(30),
 ) -> dict[str, Any]:
-  """Accept uploaded frames, reconstruct as video, run scenedetect"""
+  """Accept uploaded frames, run TransNetV2 for transition/dissolve detection"""
   if not TRANSITION_DETECTOR_AVAILABLE:
-    return {"status": "missing", "message": "scenedetect not available", "rejectedRanges": []}
+    return {"status": "missing", "message": "TransNetV2 not available", "rejectedRanges": []}
 
   try:
     if not frames:
       return {"status": "ok", "rejectedRanges": []}
 
-    # Decode first frame to get dimensions
-    first_raw = await frames[0].read()
-    first_img = cv2.imdecode(np.frombuffer(first_raw, np.uint8), cv2.IMREAD_COLOR)
-    if first_img is None:
-      return {"status": "error", "message": "Failed to decode frame", "rejectedRanges": []}
-
-    h, w = first_img.shape[:2]
-
-    # Write frames to temporary video file for scenedetect
-    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-    tmp_path = tmp.name
-    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-    writer.write(first_img)
-
-    for frame_file in frames[1:]:
+    # Decode all frames into numpy array
+    decoded = []
+    for frame_file in frames:
       raw = await frame_file.read()
       img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
       if img is not None:
-        writer.write(img)
+        # TransNetV2 expects RGB 48x27
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, (48, 27))
+        decoded.append(img_resized)
 
-    writer.release()
-    tmp.close()
+    if len(decoded) < 2:
+      return {"status": "ok", "rejectedRanges": []}
 
-    # Run scenedetect with both ContentDetector (hard cuts) and AdaptiveDetector (dissolves)
-    content_threshold = ((100.0 - threshold) / 100.0) * 27.0
-    adaptive_threshold = max(1.0, ((100.0 - threshold) / 100.0) * 3.0)
+    # Run TransNetV2
+    model = get_transnet()
+    frames_np = np.array(decoded, dtype=np.uint8)
+    predictions = model.predict_frames(frames_np)
 
-    scenes_content = detect(tmp_path, ContentDetector(threshold=content_threshold))
-    scenes_adaptive = detect(tmp_path, AdaptiveDetector(adaptive_threshold=adaptive_threshold))
-
-    # Merge scenes from both detectors
-    all_scenes = list(scenes_content) + list(scenes_adaptive)
-
+    # predictions shape: (N,) with transition probability per frame
+    threshold_norm = threshold / 100.0
     rejected_ranges = []
-    seen = set()
+    in_transition = False
+    trans_start = 0
 
-    for scene_start, scene_end in all_scenes:
-      sf = startFrame + int(scene_start.get_frames())
-      ef = startFrame + int(scene_end.get_frames())
+    for i, score in enumerate(predictions):
+      abs_frame = startFrame + i
 
-      # 5-frame buffer around transition point
-      ts = max(startFrame, sf - 2)
-      te = sf + 2
+      if float(score) > threshold_norm and not in_transition:
+        trans_start = abs_frame
+        in_transition = True
+      elif float(score) <= threshold_norm and in_transition:
+        rejected_ranges.append({
+          "startFrame": max(startFrame, trans_start - 2),
+          "endFrame": abs_frame + 2,
+          "score": float(score),
+          "reason": "Transition / crossfade",
+        })
+        in_transition = False
 
-      key = (ts, te)
-      if key in seen:
-        continue
-      seen.add(key)
-
+    # Close open transition
+    if in_transition:
       rejected_ranges.append({
-        "startFrame": ts,
-        "endFrame": te,
-        "score": 0.85,
+        "startFrame": max(startFrame, trans_start - 2),
+        "endFrame": startFrame + len(decoded) - 1,
+        "score": 0.8,
         "reason": "Transition / crossfade",
       })
-
-    # Cleanup temp file
-    os.unlink(tmp_path)
 
     return {"status": "ok", "rejectedRanges": rejected_ranges}
 
