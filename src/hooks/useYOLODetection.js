@@ -30,7 +30,7 @@ export function useYOLODetection(videoRef) {
 
       // Build auto-markers from all event types
       const newMarkers = []
-      const addM = (frameNumber, reason, flagged = false) => {
+      const addM = (frameNumber, reason, flagged = false, extra = {}) => {
         newMarkers.push({
           id: `auto${++markerId}`,
           frameNumber,
@@ -39,6 +39,7 @@ export function useYOLODetection(videoRef) {
           reason,
           customTrmWin: null,
           customTrmIntv: null,
+          ...extra,
         })
       }
 
@@ -51,7 +52,8 @@ export function useYOLODetection(videoRef) {
 
       // Flag overlap markers
       for (const ov of results.overlaps) {
-        addM(ov.frameRange[0], `Overlap ${ov.frameRange[0]}-${ov.frameRange[1]}`, true)
+        const [startFrame, endFrame] = ov.frameRange
+        addM(startFrame, `Overlap ${startFrame}-${endFrame}`, true, { overlapStartFrame: startFrame, overlapEndFrame: endFrame })
       }
 
       // Merge with existing markers (avoid duplicates by frame)

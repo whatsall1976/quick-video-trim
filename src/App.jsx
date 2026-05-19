@@ -20,7 +20,7 @@ function AppInner() {
 
   // Activate playback hook (keyboard shortcuts, RAF loop)
   useVideoPlayback(videoRef)
-  useMarkers() // Activate Cmd+Shift+M shortcut
+  useMarkers({ enableShortcuts: true }) // Activate marker keyboard shortcuts
 
   const togglePanel = useCallback((key) => {
     dispatch({ type: 'SET_ACTIVE_PANEL', payload: key })

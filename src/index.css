@@ -370,6 +370,10 @@ body {
 
 .marker-item:hover { border-color: var(--border-hover); }
 .marker-item.flagged { border-color: var(--warning); }
+.marker-item.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
 
 .marker-dot {
   width: 8px;
@@ -524,6 +528,16 @@ body {
 .timeline-marker.auto::after { background: var(--success); }
 .timeline-marker.flagged { background: var(--warning); }
 .timeline-marker.flagged::after { background: var(--warning); }
+.timeline-marker.selected {
+  z-index: 7;
+}
+.timeline-marker.selected::after {
+  top: -2px;
+  left: -6px;
+  width: 14px;
+  height: 14px;
+  outline: 2px solid #fff;
+}
 
 .timeline-labels {
   display: flex;

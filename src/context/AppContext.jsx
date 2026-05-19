@@ -24,6 +24,7 @@ const initialState = {
   exportMessage: '',
   detectionProgress: 0,
   isDetecting: false,
+  selectedMarkerId: null,
 }
 
 function calcTrimSegments(markers, settings) {
@@ -33,9 +34,18 @@ function calcTrimSegments(markers, settings) {
   // Build raw windows per marker
   const windows = markers
     .map(m => {
+      if (Number.isFinite(m.overlapStartFrame) && Number.isFinite(m.overlapEndFrame)) {
+        return {
+          startFrame: Math.min(m.overlapStartFrame, m.overlapEndFrame),
+          endFrame: Math.max(m.overlapStartFrame, m.overlapEndFrame),
+          markerId: m.id,
+          reason: 'overlap',
+          customTrmIntv: m.customTrmIntv,
+        }
+      }
       const w = m.customTrmWin ?? trmWin
       const h = Math.floor(w / 2)
-      return { startFrame: m.frameNumber - h, endFrame: m.frameNumber + h, markerId: m.id, reason: 'marker' }
+      return { startFrame: m.frameNumber - h, endFrame: m.frameNumber + h, markerId: m.id, reason: 'marker', customTrmIntv: m.customTrmIntv }
     })
     .sort((a, b) => a.startFrame - b.startFrame)
 
@@ -58,7 +68,7 @@ function calcTrimSegments(markers, settings) {
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_VIDEO':
-      return { ...state, video: { ...state.video, ...action.payload }, markers: [], trimSegments: [], playback: { ...state.playback, currentFrame: 0, isPlaying: false } }
+      return { ...state, video: { ...state.video, ...action.payload }, markers: [], trimSegments: [], selectedMarkerId: null, playback: { ...state.playback, currentFrame: 0, isPlaying: false } }
 
     case 'SET_FRAME':
       return { ...state, playback: { ...state.playback, currentFrame: action.payload } }
@@ -76,7 +86,8 @@ function reducer(state, action) {
 
     case 'REMOVE_MARKER': {
       const markers = state.markers.filter(m => m.id !== action.payload)
-      return { ...state, markers, trimSegments: calcTrimSegments(markers, state.settings) }
+      const selectedMarkerId = state.selectedMarkerId === action.payload ? null : state.selectedMarkerId
+      return { ...state, markers, selectedMarkerId, trimSegments: calcTrimSegments(markers, state.settings) }
     }
 
     case 'UPDATE_MARKER': {
@@ -87,8 +98,12 @@ function reducer(state, action) {
 
     case 'SET_MARKERS': {
       const markers = [...action.payload].sort((a, b) => a.frameNumber - b.frameNumber)
-      return { ...state, markers, trimSegments: calcTrimSegments(markers, state.settings) }
+      const selectedMarkerId = markers.some(m => m.id === state.selectedMarkerId) ? state.selectedMarkerId : null
+      return { ...state, markers, selectedMarkerId, trimSegments: calcTrimSegments(markers, state.settings) }
     }
+
+    case 'SET_SELECTED_MARKER':
+      return { ...state, selectedMarkerId: action.payload }
 
     case 'UPDATE_SETTINGS': {
       const settings = { ...state.settings, ...action.payload }

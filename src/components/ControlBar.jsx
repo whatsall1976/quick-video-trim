@@ -74,6 +74,7 @@ export default function ControlBar({ onClose }) {
               ['Speed up (playing)', 'Shift + →'],
               ['Slow down (playing)', 'Shift + ←'],
               ['Add marker', '⌘ Shift M'],
+              ['Delete selected marker', 'Delete'],
             ].map(([label, key]) => (
               <tr key={label}>
                 <td style={{ color: 'var(--text-muted)', fontSize: 11 }}>{label}</td>

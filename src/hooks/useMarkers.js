@@ -3,9 +3,9 @@ import { useApp } from '../context/AppContext'
 
 let markerId = 0
 
-export function useMarkers() {
+export function useMarkers({ enableShortcuts = false } = {}) {
   const { state, dispatch, toast } = useApp()
-  const { video, playback } = state
+  const { video, playback, selectedMarkerId } = state
 
   const addMarker = useCallback((frameNumber, opts = {}) => {
     if (!video.file) return
@@ -43,10 +43,21 @@ export function useMarkers() {
     dispatch({ type: 'UPDATE_MARKER', payload: { id, ...changes } })
   }, [dispatch, video.totalFrames, toast])
 
+  const selectMarker = useCallback((id) => {
+    dispatch({ type: 'SET_SELECTED_MARKER', payload: id })
+  }, [dispatch])
+
   // Cmd+Shift+M to add marker at current frame
   useEffect(() => {
+    if (!enableShortcuts) return
     const onKey = (e) => {
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedMarkerId) {
+        e.preventDefault()
+        removeMarker(selectedMarkerId)
+        toast('Marker deleted', 'info', 1200)
+        return
+      }
       // Debug: log all Shift+M attempts
       if (e.shiftKey && (e.code === 'KeyM' || e.key === 'M' || e.key === 'm')) {
         console.log('[DEBUG] Shift+M detected', { metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, code: e.code, key: e.key })
@@ -60,7 +71,7 @@ export function useMarkers() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [video, playback.currentFrame, addMarker, toast])
+  }, [enableShortcuts, video, playback.currentFrame, addMarker, removeMarker, selectedMarkerId, toast])
 
-  return { addMarker, removeMarker, updateMarker }
+  return { addMarker, removeMarker, updateMarker, selectMarker }
 }

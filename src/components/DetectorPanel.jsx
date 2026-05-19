@@ -1,10 +1,12 @@
 import { useApp } from '../context/AppContext'
+import { useMarkers } from '../hooks/useMarkers'
 import { useYOLODetection } from '../hooks/useYOLODetection'
 
 export default function DetectorPanel({ videoRef, onClose }) {
   const { state, dispatch, toast } = useApp()
-  const { isDetecting, detectionProgress, detectionResults, markers, video } = state
+  const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId } = state
   const { runDetectionPipeline } = useYOLODetection(videoRef)
+  const { updateMarker, selectMarker } = useMarkers()
 
   const flagged = markers.filter(m => m.flagged)
   const auto = markers.filter(m => m.autoDetected)
@@ -15,6 +17,45 @@ export default function DetectorPanel({ videoRef, onClose }) {
 
   const removeMarker = (id) => {
     dispatch({ type: 'REMOVE_MARKER', payload: id })
+  }
+
+  const goToMarker = (m) => {
+    selectMarker(m.id)
+    dispatch({ type: 'SET_FRAME', payload: m.frameNumber })
+    dispatch({ type: 'SET_PLAYING', payload: false })
+  }
+
+  const updateOverlapFrame = (m, key, value) => {
+    const frame = parseInt(value, 10)
+    if (isNaN(frame)) return
+    if (frame < 0 || frame >= video.totalFrames) {
+      toast('Overlap frame out of bounds', 'error', 1800)
+      return
+    }
+
+    const startFrame = key === 'overlapStartFrame' ? frame : (m.overlapStartFrame ?? m.frameNumber)
+    const endFrame = key === 'overlapEndFrame' ? frame : (m.overlapEndFrame ?? m.frameNumber)
+    if (startFrame > endFrame) {
+      toast('Overlap start must be before end', 'warning', 1800)
+      return
+    }
+
+    const changes = {
+      [key]: frame,
+      reason: `Overlap ${startFrame}-${endFrame}`,
+    }
+    if (key === 'overlapStartFrame') changes.frameNumber = frame
+    updateMarker(m.id, changes)
+  }
+
+  const removeAllFlagged = () => {
+    dispatch({ type: 'SET_MARKERS', payload: markers.filter(m => !m.flagged) })
+    toast('Flagged overlap markers removed', 'info', 1500)
+  }
+
+  const removeAllAuto = () => {
+    dispatch({ type: 'SET_MARKERS', payload: markers.filter(m => !m.autoDetected) })
+    toast('Auto-detected markers removed', 'info', 1500)
   }
 
   const { thresholdCrossings = [], sizeJumps = [], movements = [], overlaps = [] } = detectionResults
@@ -76,8 +117,14 @@ export default function DetectorPanel({ videoRef, onClose }) {
         {auto.length > 0 && (
           <>
             <div className="section-divider">Auto Markers ({auto.length})</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              {auto.length} markers auto-placed. Review in the Markers panel (M).
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="btn btn-danger"
+                style={{ flex: 1, fontSize: 11 }}
+                onClick={removeAllAuto}
+              >
+                Remove Auto Markers
+              </button>
             </div>
           </>
         )}
@@ -88,14 +135,58 @@ export default function DetectorPanel({ videoRef, onClose }) {
             <div className="section-divider" style={{ color: 'var(--warning)' }}>
               ⚠ Flagged Overlaps ({flagged.length})
             </div>
+            <button
+              className="btn btn-danger"
+              style={{ width: '100%', fontSize: 11 }}
+              onClick={removeAllFlagged}
+            >
+              Remove All Overlap Markers
+            </button>
             {flagged.map(m => (
-              <div key={m.id} className="marker-item flagged" id={`flagged-${m.id}`}>
+              <div
+                key={m.id}
+                className={`marker-item flagged ${selectedMarkerId === m.id ? 'selected' : ''}`}
+                id={`flagged-${m.id}`}
+                onClick={() => selectMarker(m.id)}
+              >
                 <div className="marker-dot flagged" />
                 <div className="marker-info">
                   <div className="marker-frame">Frame {m.frameNumber}</div>
                   <div className="marker-meta">{m.reason ?? 'Multiple faces detected'}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 }}>
+                    <div className="form-row">
+                      <span className="form-label">Overlap start</span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={0}
+                        max={Math.max(0, video.totalFrames - 1)}
+                        defaultValue={m.overlapStartFrame ?? m.frameNumber}
+                        onBlur={e => updateOverlapFrame(m, 'overlapStartFrame', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <span className="form-label">Overlap end</span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min={0}
+                        max={Math.max(0, video.totalFrames - 1)}
+                        defaultValue={m.overlapEndFrame ?? m.frameNumber}
+                        onBlur={e => updateOverlapFrame(m, 'overlapEndFrame', e.target.value)}
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className="marker-actions">
+                  <button
+                    className="icon-btn"
+                    onClick={() => goToMarker(m)}
+                    title="Jump to frame"
+                    style={{ color: 'var(--accent)' }}
+                  >
+                    ⤷
+                  </button>
                   <button
                     className="btn"
                     style={{ fontSize: 11, padding: '3px 8px', color: 'var(--success)', borderColor: 'var(--success)' }}

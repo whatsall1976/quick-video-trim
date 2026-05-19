@@ -4,15 +4,20 @@ import { useMarkers } from '../hooks/useMarkers'
 
 export default function MarkerPanel({ onClose }) {
   const { state, dispatch, toast } = useApp()
-  const { markers, video, settings } = state
-  const { removeMarker, updateMarker, addMarker } = useMarkers()
+  const { markers, video, settings, selectedMarkerId } = state
+  const { removeMarker, updateMarker, addMarker, selectMarker } = useMarkers()
   const [editingId, setEditingId] = useState(null)
+  const [newMarkerFrame, setNewMarkerFrame] = useState('')
 
   const dotClass = (m) => m.flagged ? 'flagged' : m.autoDetected ? 'auto' : 'manual'
 
   const handleFrameEdit = (m, val) => {
     const frame = parseInt(val, 10)
     if (isNaN(frame)) return
+    if (frame < 0 || frame >= video.totalFrames) {
+      toast('Marker position out of bounds', 'error', 1800)
+      return
+    }
     updateMarker(m.id, { frameNumber: frame })
   }
 
@@ -26,9 +31,42 @@ export default function MarkerPanel({ onClose }) {
     updateMarker(m.id, { customTrmIntv: isNaN(v) || v <= 0 ? null : v })
   }
 
+  const handleOverlapEdit = (m, key, val) => {
+    const frame = parseInt(val, 10)
+    if (isNaN(frame)) return
+    if (frame < 0 || frame >= video.totalFrames) {
+      toast('Overlap frame out of bounds', 'error', 1800)
+      return
+    }
+    const startFrame = key === 'overlapStartFrame' ? frame : (m.overlapStartFrame ?? m.frameNumber)
+    const endFrame = key === 'overlapEndFrame' ? frame : (m.overlapEndFrame ?? m.frameNumber)
+    if (startFrame > endFrame) {
+      toast('Overlap start must be before end', 'warning', 1800)
+      return
+    }
+    const changes = { [key]: frame, reason: `Overlap ${startFrame}-${endFrame}` }
+    if (key === 'overlapStartFrame') changes.frameNumber = frame
+    updateMarker(m.id, changes)
+  }
+
   const goToMarker = (m) => {
+    selectMarker(m.id)
     dispatch({ type: 'SET_FRAME', payload: m.frameNumber })
     dispatch({ type: 'SET_PLAYING', payload: false })
+  }
+
+  const addMarkerAtFrame = () => {
+    const frame = parseInt(newMarkerFrame, 10)
+    if (isNaN(frame)) {
+      toast('Enter a frame number', 'warning')
+      return
+    }
+    const m = addMarker(frame)
+    if (m) {
+      selectMarker(m.id)
+      setEditingId(m.id)
+      setNewMarkerFrame('')
+    }
   }
 
   const loadProject = async (e) => {
@@ -58,7 +96,10 @@ export default function MarkerPanel({ onClose }) {
             onClick={() => {
               if (video.file) {
                 const m = addMarker(state.playback.currentFrame)
-                if (m) setEditingId(m.id)
+                if (m) {
+                  selectMarker(m.id)
+                  setEditingId(m.id)
+                }
               }
             }}
             disabled={!video.file}
@@ -71,6 +112,27 @@ export default function MarkerPanel({ onClose }) {
             <input type="file" accept=".json" style={{ display: 'none' }} onChange={loadProject} />
           </label>
         </div>
+        <div className="form-row">
+          <span className="form-label">Add at frame</span>
+          <input
+            className="form-input"
+            type="number"
+            min={0}
+            max={Math.max(0, video.totalFrames - 1)}
+            value={newMarkerFrame}
+            onChange={e => setNewMarkerFrame(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addMarkerAtFrame() }}
+            disabled={!video.file}
+          />
+          <button
+            className="btn"
+            style={{ fontSize: 11, padding: '5px 8px' }}
+            onClick={addMarkerAtFrame}
+            disabled={!video.file}
+          >
+            Add
+          </button>
+        </div>
 
         {markers.length === 0 && (
           <div className="empty-state">
@@ -79,7 +141,12 @@ export default function MarkerPanel({ onClose }) {
         )}
 
         {markers.map((m) => (
-          <div key={m.id} className={`marker-item ${m.flagged ? 'flagged' : ''}`} id={`marker-${m.id}`}>
+          <div
+            key={m.id}
+            className={`marker-item ${m.flagged ? 'flagged' : ''} ${selectedMarkerId === m.id ? 'selected' : ''}`}
+            id={`marker-${m.id}`}
+            onClick={() => selectMarker(m.id)}
+          >
             <div className={`marker-dot ${dotClass(m)}`} />
             <div className="marker-info">
               <div className="marker-frame">Frame {m.frameNumber}</div>
@@ -98,6 +165,32 @@ export default function MarkerPanel({ onClose }) {
                       onBlur={e => handleFrameEdit(m, e.target.value)}
                     />
                   </div>
+                  {m.flagged && (
+                    <>
+                      <div className="form-row">
+                        <span className="form-label">Overlap start</span>
+                        <input
+                          className="form-input"
+                          type="number"
+                          defaultValue={m.overlapStartFrame ?? m.frameNumber}
+                          min={0}
+                          max={video.totalFrames - 1}
+                          onBlur={e => handleOverlapEdit(m, 'overlapStartFrame', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-row">
+                        <span className="form-label">Overlap end</span>
+                        <input
+                          className="form-input"
+                          type="number"
+                          defaultValue={m.overlapEndFrame ?? m.frameNumber}
+                          min={0}
+                          max={video.totalFrames - 1}
+                          onBlur={e => handleOverlapEdit(m, 'overlapEndFrame', e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
                   <div className="form-row">
                     <span className="form-label">Trim win override</span>
                     <input

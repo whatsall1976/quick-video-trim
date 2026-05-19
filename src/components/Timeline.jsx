@@ -4,8 +4,8 @@ import { useMarkers } from '../hooks/useMarkers'
 
 export default function Timeline() {
   const { state, dispatch } = useApp()
-  const { video, playback, markers, trimSegments } = state
-  const { updateMarker } = useMarkers()
+  const { video, playback, markers, trimSegments, selectedMarkerId } = state
+  const { updateMarker, selectMarker } = useMarkers()
   const trackRef = useRef(null)
   const draggingRef = useRef(null)
 
@@ -21,6 +21,7 @@ export default function Timeline() {
 
   const onMarkerMouseDown = useCallback((e, markerId) => {
     e.stopPropagation()
+    selectMarker(markerId)
     draggingRef.current = markerId
     const rect = trackRef.current.getBoundingClientRect()
 
@@ -36,7 +37,7 @@ export default function Timeline() {
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [video, updateMarker])
+  }, [video, updateMarker, selectMarker])
 
   const fmt = (f) => {
     const s = f / (video.fps || 30)
@@ -85,9 +86,10 @@ export default function Timeline() {
         {markers.map(m => (
           <div
             key={m.id}
-            className={`timeline-marker ${m.flagged ? 'flagged' : m.autoDetected ? 'auto' : 'manual'}`}
+            className={`timeline-marker ${m.flagged ? 'flagged' : m.autoDetected ? 'auto' : 'manual'} ${selectedMarkerId === m.id ? 'selected' : ''}`}
             style={{ left: `${toPercent(m.frameNumber)}%` }}
             onMouseDown={e => onMarkerMouseDown(e, m.id)}
+            onClick={(e) => { e.stopPropagation(); selectMarker(m.id) }}
             title={`${m.autoDetected ? 'Auto' : 'Manual'} marker · Frame ${m.frameNumber}${m.reason ? ` · ${m.reason}` : ''}`}
           />
         ))}
