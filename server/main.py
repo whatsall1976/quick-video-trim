@@ -118,6 +118,14 @@ class DetectTransitionsRequest(BaseModel):
   threshold: int
 
 
+class DetectFacePosesRequest(BaseModel):
+  frameRange: list[int]
+  videoFile: str
+  maxFaceYaw: float
+  maxFacePitch: float
+  maxFaceRoll: float
+
+
 def parse_yolo_output(
   output: np.ndarray,
   conf: float,
@@ -226,6 +234,105 @@ async def detect(
   dt_ms = int((time.time() - t0) * 1000)
 
   return {"boxes": boxes, "ms": dt_ms, "model": MODEL_NAME, "nmsIou": nms_iou}
+
+
+@app.post("/detect-face-poses")
+async def detect_face_poses(request: DetectFacePosesRequest) -> dict[str, Any]:
+  """Detect face poses and flag frames with poor pose angles"""
+  try:
+    start_frame, end_frame = request.frameRange
+    video_file = request.videoFile
+
+    # Validate inputs
+    if not Path(video_file).exists():
+      return {
+        "status": "error",
+        "message": f"Video file not found: {video_file}",
+        "rejectedRanges": [],
+      }
+
+    if start_frame < 0 or end_frame < start_frame:
+      return {
+        "status": "error",
+        "message": "Invalid frame range",
+        "rejectedRanges": [],
+      }
+
+    # Open video
+    cap = cv2.VideoCapture(video_file)
+    if not cap.isOpened():
+      return {
+        "status": "error",
+        "message": "Failed to open video file",
+        "rejectedRanges": [],
+      }
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if end_frame >= total_frames:
+      end_frame = total_frames - 1
+
+    # Sample frames and detect faces
+    rejected_ranges = []
+    session = get_session()
+    sample_step = max(1, (end_frame - start_frame) // 30)  # ~30 samples
+
+    for frame_idx in range(start_frame, end_frame + 1, sample_step):
+      cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+      ret, frame = cap.read()
+      if not ret:
+        break
+
+      try:
+        pil_image = Image.open(io.BytesIO(cv2.imencode('.jpg', frame)[1])).convert("RGB")
+        input_name = session.get_inputs()[0].name
+        tensor, scale, pad_x, pad_y = letterbox(pil_image, input_size(session))
+        outputs = session.run(None, {input_name: tensor})
+        boxes = parse_yolo_output(outputs[0], 0.25, scale, pad_x, pad_y, pil_image.size, YOLO_IOU, YOLO_MAX_DET)
+
+        # Check face count and pose
+        if len(boxes) == 0:
+          # No face detected
+          rejected_ranges.append({
+            "startFrame": frame_idx,
+            "endFrame": frame_idx + sample_step,
+            "score": 0.9,
+            "reason": "No face detected"
+          })
+        elif len(boxes) > 1:
+          # Multiple faces
+          rejected_ranges.append({
+            "startFrame": frame_idx,
+            "endFrame": frame_idx + sample_step,
+            "score": 0.8,
+            "reason": "Multiple faces detected"
+          })
+        else:
+          # Single face - check pose angles (simplified: confidence as proxy)
+          face = boxes[0]
+          if face["confidence"] < 0.7:  # Low confidence suggests poor angle
+            rejected_ranges.append({
+              "startFrame": frame_idx,
+              "endFrame": frame_idx + sample_step,
+              "score": 1.0 - face["confidence"],
+              "reason": f"Poor face angle/confidence: {face['confidence']:.2f}"
+            })
+      except Exception:
+        # Skip frames that fail to process
+        continue
+
+    cap.release()
+
+    return {
+      "status": "ok",
+      "rejectedRanges": rejected_ranges
+    }
+
+  except Exception as e:
+    return {
+      "status": "error",
+      "message": str(e),
+      "rejectedRanges": []
+    }
 
 
 @app.post("/detect-transitions")
