@@ -66,8 +66,8 @@ export default function SettingsPanel({ onClose }) {
         <button className="panel-close" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="panel-body">
-        <div className="section-divider">Trim Parameters</div>
-        {FIELDS.slice(0, 2).map(f => (
+        <div className="section-divider">Trim</div>
+        {TRIM_FIELDS.map(f => (
           <div key={f.key} className="form-row">
             <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
             <input
@@ -82,60 +82,7 @@ export default function SettingsPanel({ onClose }) {
           </div>
         ))}
 
-        <div className="section-divider">Detection Thresholds</div>
-        {FIELDS.slice(2).map(f => (
-          <div key={f.key} className="form-row">
-            <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
-            <input
-              id={`setting-${f.key}`}
-              className="form-input"
-              type="number"
-              value={settings[f.key]}
-              min={f.min}
-              max={f.max}
-              onChange={e => update(f.key, e.target.value)}
-            />
-          </div>
-        ))}
-
-        <div className="section-divider">Overlap Detection</div>
-        {OVERLAP_FIELDS.map(f => (
-          <div key={f.key} className="form-row">
-            <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
-            <input
-              id={`setting-${f.key}`}
-              className="form-input"
-              type="number"
-              value={settings[f.key]}
-              min={f.min}
-              max={f.max}
-              onChange={e => update(f.key, e.target.value)}
-            />
-          </div>
-        ))}
-        <button
-          className="btn"
-          style={{ width: '100%', fontSize: 11 }}
-          onClick={snapshotOverlapSettings}
-          disabled={!video.file || !selectedMarker || isDetecting}
-          title={selectedMarker ? `Use selected marker at frame ${selectedMarker.frameNumber}` : 'Select or add an overlap marker first'}
-        >
-          {isDetecting && snapshotProgress > 0
-            ? `Snapshotting ${snapshotProgress}%`
-            : `Snapshot From ${selectedMarker ? `Frame ${selectedMarker.frameNumber}` : 'Selected Marker'}`}
-        </button>
-        {lastSnapshot && (
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '6px 8px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
-            <div>Snapshot frames {lastSnapshot.frameRange[0]}-{lastSnapshot.frameRange[1]}, {lastSnapshot.samples.length}/{lastSnapshot.scannedFrames} overlap samples.</div>
-            {lastSnapshot.metrics && (
-              <div>
-                IoU {pct(lastSnapshot.metrics.minIou)}-{pct(lastSnapshot.metrics.maxIou)}, coverage {pct(lastSnapshot.metrics.minSmallFaceCoverage)}-{pct(lastSnapshot.metrics.maxSmallFaceCoverage)}, separation {pct(lastSnapshot.metrics.minCenterSeparation)}-{pct(lastSnapshot.metrics.maxCenterSeparation)}.
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="section-divider">Audio Mode</div>
+        <div className="section-divider">Audio</div>
         <div className="form-row">
           <label className="form-label" htmlFor="setting-audioMode">Audio Mode</label>
           <select
@@ -156,6 +103,58 @@ export default function SettingsPanel({ onClose }) {
           {settings.audioMode === 'Mute' && '▸ Output video will have no audio track.'}
           {settings.audioMode === 'Separate' && '▸ Original audio applied to full output video (ignores trim). 5-second fade out at end.'}
         </div>
+
+        <div className="section-divider">Quality Gates</div>
+
+        {/* Detection Models Checkboxes */}
+        <div style={{ marginBottom: '8px' }}>
+          <div className="form-row">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={settings.detectionModels?.transnetv2 ?? true}
+                onChange={() => updateDetectionModel('transnetv2')}
+              />
+              <span className="form-label" style={{ margin: 0 }}>TransNetV2</span>
+            </label>
+          </div>
+          <div className="form-row">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={settings.detectionModels?.faceLandmarker ?? true}
+                onChange={() => updateDetectionModel('faceLandmarker')}
+              />
+              <span className="form-label" style={{ margin: 0 }}>Face Landmarker</span>
+            </label>
+          </div>
+          <div className="form-row">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={settings.detectionModels?.occlusion ?? true}
+                onChange={() => updateDetectionModel('occlusion')}
+              />
+              <span className="form-label" style={{ margin: 0 }}>Occlusion Detector</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Quality Gates Threshold Fields */}
+        {QUALITY_GATES_FIELDS.map(f => (
+          <div key={f.key} className="form-row">
+            <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
+            <input
+              id={`setting-${f.key}`}
+              className="form-input"
+              type="number"
+              value={settings[f.key]}
+              min={f.min}
+              max={f.max}
+              onChange={e => update(f.key, e.target.value)}
+            />
+          </div>
+        ))}
 
         {/* Live trim summary */}
         {trimSegments.length > 0 && (
