@@ -13,12 +13,11 @@ from pydantic import BaseModel
 from PIL import Image
 
 try:
-  import torch
-  from transnetv2 import TransNetV2
+  from scenedetect import detect, AdaptiveDetector, FrameTimecode
 
-  TRANSNETV2_AVAILABLE = True
+  TRANSITION_DETECTOR_AVAILABLE = True
 except ImportError:
-  TRANSNETV2_AVAILABLE = False
+  TRANSITION_DETECTOR_AVAILABLE = False
 
 APP_HOST = os.getenv("YOLO_SERVER_HOST", "127.0.0.1")
 APP_PORT = int(os.getenv("YOLO_SERVER_PORT", "8765"))
@@ -231,8 +230,8 @@ async def detect(
 
 @app.post("/detect-transitions")
 async def detect_transitions(request: DetectTransitionsRequest) -> dict[str, Any]:
-  if not TRANSNETV2_AVAILABLE:
-    return {"status": "missing", "message": "TransNetV2 not available", "rejectedRanges": []}
+  if not TRANSITION_DETECTOR_AVAILABLE:
+    return {"status": "missing", "message": "Scene detection not available", "rejectedRanges": []}
 
   try:
     start_frame, end_frame = request.frameRange
@@ -261,7 +260,7 @@ async def detect_transitions(request: DetectTransitionsRequest) -> dict[str, Any
         "rejectedRanges": [],
       }
 
-    # Open video and extract frames in the range
+    # Get video info
     cap = cv2.VideoCapture(video_file)
     if not cap.isOpened():
       return {
@@ -271,76 +270,46 @@ async def detect_transitions(request: DetectTransitionsRequest) -> dict[str, Any
       }
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+
+    # Clamp frame range
     if end_frame >= total_frames:
       end_frame = total_frames - 1
 
-    frames = []
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-    for frame_idx in range(start_frame, end_frame + 1):
-      ret, frame = cap.read()
-      if not ret:
-        break
-      # Convert BGR to RGB for TransNetV2
-      frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-      frames.append(frame_rgb)
+    # Convert threshold percentage to adaptive detector sensitivity
+    # Threshold 50% = standard sensitivity, lower values = more sensitive
+    # scenedetect threshold is in [0.0, 100.0], we use (100-threshold)*0.27 for linear sensitivity
+    detector_threshold = ((100.0 - threshold) / 100.0) * 27.0
 
-    cap.release()
+    # Detect scenes/transitions using adaptive detector
+    scenes = detect(video_file, AdaptiveDetector(luma_only=False, threshold=detector_threshold))
 
-    if not frames:
-      return {"status": "ok", "rejectedRanges": []}
-
-    # Run TransNetV2 detection
-    model = TransNetV2()
-    frames_array = np.array(frames, dtype=np.uint8)
-
-    # TransNetV2 expects frames in [0, 255] range
-    predictions = model.predict_on_video(frames_array)
-
-    # Process predictions to find transitions
-    threshold_normalized = threshold / 100.0
+    # Filter scenes to only those within the requested frame range
     rejected_ranges = []
+    for scene_start, scene_end in scenes:
+      # FrameTimecode to frame number
+      start_frame_num = int(scene_start.get_frames())
+      end_frame_num = int(scene_end.get_frames())
 
-    # predictions is a 1D array of transition scores for each frame
-    for i, score in enumerate(predictions[:-1]):
-      if score >= threshold_normalized:
-        # Found a transition, collect adjacent frames with high scores
-        transition_start = i
-        transition_end = i + 1
+      # Check if scene is within our range
+      if end_frame_num > start_frame and start_frame_num < end_frame:
+        # Clamp to requested range
+        clamp_start = max(start_frame_num, start_frame)
+        clamp_end = min(end_frame_num, end_frame)
 
-        # Expand backwards
-        for j in range(i - 1, -1, -1):
-          if predictions[j] >= threshold_normalized * 0.5:
-            transition_start = j
-          else:
-            break
+        # Create a 5-frame buffer around the transition
+        transition_start = max(start_frame, clamp_start - 2)
+        transition_end = min(end_frame, clamp_end + 2)
 
-        # Expand forwards
-        for j in range(i + 2, len(predictions)):
-          if predictions[j] >= threshold_normalized * 0.5:
-            transition_end = j + 1
-          else:
-            break
-
-        # Convert from relative to absolute frame indices
-        abs_start = start_frame + transition_start
-        abs_end = start_frame + transition_end
-
-        # Check if this overlaps with any existing range
-        overlaps = False
-        for existing in rejected_ranges:
-          if not (abs_end < existing["startFrame"] or abs_start > existing["endFrame"]):
-            overlaps = True
-            break
-
-        if not overlaps:
-          rejected_ranges.append(
-            {
-              "startFrame": abs_start,
-              "endFrame": abs_end,
-              "score": float(score),
-              "reason": "Transition / crossfade",
-            }
-          )
+        rejected_ranges.append(
+          {
+            "startFrame": transition_start,
+            "endFrame": transition_end,
+            "score": 0.85,  # Adaptive detector doesn't provide per-frame scores
+            "reason": "Transition / crossfade",
+          }
+        )
 
     return {"status": "ok", "rejectedRanges": rejected_ranges}
 
