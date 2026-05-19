@@ -6,7 +6,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
   const { state, dispatch, toast } = useApp()
   const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId, settings } = state
   const { runDetectionPipeline } = useQualityDetection(videoRef)
-  const { updateMarker, selectMarker } = useMarkers()
+  const { selectMarker } = useMarkers()
 
   const flagged = markers.filter(m => m.flagged)
   const auto = markers.filter(m => m.autoDetected)
@@ -49,29 +49,6 @@ export default function DetectorPanel({ videoRef, onClose }) {
 
   const setTestEndToDefault = () => {
     dispatch({ type: 'UPDATE_SETTINGS', payload: { detectionTestEndFrame: defaultTestEndFrame } })
-  }
-
-  const updateOverlapFrame = (m, key, value) => {
-    const frame = parseInt(value, 10)
-    if (isNaN(frame)) return
-    if (frame < 0 || frame >= video.totalFrames) {
-      toast('Overlap frame out of bounds', 'error', 1800)
-      return
-    }
-
-    const startFrame = key === 'overlapStartFrame' ? frame : (m.overlapStartFrame ?? m.frameNumber)
-    const endFrame = key === 'overlapEndFrame' ? frame : (m.overlapEndFrame ?? m.frameNumber)
-    if (startFrame > endFrame) {
-      toast('Overlap start must be before end', 'warning', 1800)
-      return
-    }
-
-    const changes = {
-      [key]: frame,
-      reason: `Overlap ${startFrame}-${endFrame}`,
-    }
-    if (key === 'overlapStartFrame') changes.frameNumber = frame
-    updateMarker(m.id, changes)
   }
 
   const removeAllFlagged = () => {

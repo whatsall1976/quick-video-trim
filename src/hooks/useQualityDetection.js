@@ -6,8 +6,6 @@ import { faceLandmarkerDetect } from '../utils/qualityDetectors/faceLandmarkerDe
 import { occlusionDetect } from '../utils/qualityDetectors/occlusionDetector'
 import { mergeRejectedRanges } from '../utils/qualityDetectors/ranges'
 
-let markerCounter = 2000
-
 export function useQualityDetection(videoRef) {
   const { state, dispatch, toast } = useApp()
   const { addMarker } = useMarkers()
