@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useMarkers } from './useMarkers'
-import { transnetDetect } from '../utils/qualityDetectors/transnetDetector'
+import { dissolveDetect, snapshotDissolve } from '../utils/qualityDetectors/dissolveDetector'
 import { faceLandmarkerDetect, snapshotFaceParams } from '../utils/qualityDetectors/faceLandmarkerDetector'
 import { occlusionDetect } from '../utils/qualityDetectors/occlusionDetector'
 import { mergeRejectedRanges } from '../utils/qualityDetectors/ranges'
@@ -23,7 +23,6 @@ export function useQualityDetection(videoRef) {
       const totalFrames = state.video.totalFrames || 0
       const maxFrame = Math.max(0, totalFrames - 1)
 
-      // 1. Compute frame range
       const testStartFrame = Math.min(
         Math.max(0, Math.round(state.settings.detectionTestStartFrame ?? 0)),
         maxFrame
@@ -48,16 +47,15 @@ export function useQualityDetection(videoRef) {
       dispatch({ type: 'SET_DETECTION_PROGRESS', payload: 0 })
 
       try {
-        // 2. Run detectors SEQUENTIALLY - they all seek videoElement.currentTime
-        // Running in parallel causes race conditions on the video seek position
+        // Run detectors SEQUENTIALLY - they all seek videoElement.currentTime
         const modelRuns = []
 
-        // TransNetV2 first (extracts frames then sends to server)
-        if (state.settings.detectionModels.transnetv2) {
-          const result = await transnetDetect(videoEl, frameRange, state.settings.transnetThreshold)
-          modelRuns.push({ key: 'transnetv2', label: 'TransNetV2', enabled: true, ...result })
+        // Dissolve detector first (client-side pixel math)
+        if (state.settings.detectionModels.dissolve) {
+          const result = await dissolveDetect(videoEl, frameRange, state.settings.dissolveThreshold)
+          modelRuns.push({ key: 'dissolve', label: 'Dissolve', enabled: true, ...result })
         } else {
-          modelRuns.push({ key: 'transnetv2', label: 'TransNetV2', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
+          modelRuns.push({ key: 'dissolve', label: 'Dissolve', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
 
         // Face Landmarker second
@@ -80,30 +78,19 @@ export function useQualityDetection(videoRef) {
           modelRuns.push({ key: 'occlusion', label: 'Occlusion', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
 
-        // 4. Merge rejected ranges
+        // Merge rejected ranges
         const allRanges = []
         for (const run of modelRuns) {
           if (run.rejectedRanges) {
             for (const range of run.rejectedRanges) {
-              allRanges.push({
-                ...range,
-                source: run.key,
-              })
+              allRanges.push({ ...range, source: run.key })
             }
           }
         }
         const mergedRejectedRanges = mergeRejectedRanges(allRanges)
 
-        // 5. Dispatch SET_DETECTION_RESULTS
-        const results = {
-          frameRange,
-          runMode,
-          modelRuns,
-          rejectedRanges: mergedRejectedRanges,
-        }
-        dispatch({ type: 'SET_DETECTION_RESULTS', payload: results })
+        dispatch({ type: 'SET_DETECTION_RESULTS', payload: { frameRange, runMode, modelRuns, rejectedRanges: mergedRejectedRanges } })
 
-        // 6. Convert rejectedRanges to flagged markers
         for (const range of mergedRejectedRanges) {
           addMarker(range.startFrame, {
             autoDetected: true,
@@ -114,14 +101,9 @@ export function useQualityDetection(videoRef) {
           })
         }
 
-        // 7. Toast summary
         const flaggedCount = mergedRejectedRanges.length
         const label = isTestRun ? `Test detection (frames ${frameRange[0]}-${frameRange[1]})` : 'Detection'
-        toast(
-          `${label} complete: ${flaggedCount} ranges flagged.`,
-          'success',
-          5000
-        )
+        toast(`${label} complete: ${flaggedCount} ranges flagged.`, 'success', 5000)
       } catch (err) {
         console.error('[useQualityDetection] Error:', err)
         toast(`Detection failed: ${err.message}`, 'error', 6000)
@@ -142,66 +124,46 @@ export function useQualityDetection(videoRef) {
       }
 
       const frameNumber = state.playback.currentFrame
-
       const result = { frameNumber, detectors: {} }
 
-      // Face Landmarker snapshot (yaw/pitch/roll + face count)
+      // Dissolve snapshot
+      if (state.settings.detectionModels.dissolve) {
+        try {
+          const fps = state.video.fps || 30
+          const totalFrames = state.video.totalFrames || 0
+          result.detectors.dissolve = await snapshotDissolve(videoEl, frameNumber, fps, totalFrames)
+        } catch (err) {
+          result.detectors.dissolve = { error: err.message }
+        }
+      }
+
+      // Face Landmarker snapshot
       if (state.settings.detectionModels.faceLandmarker) {
         try {
-          const snap = await snapshotFaceParams(videoEl, frameNumber)
-          result.detectors.faceLandmarker = snap
+          result.detectors.faceLandmarker = await snapshotFaceParams(videoEl, frameNumber)
         } catch (err) {
           result.detectors.faceLandmarker = { error: err.message }
         }
       }
 
-      // Occlusion snapshot (visibility scores) - reuses face landmarker data
+      // Occlusion snapshot
       if (state.settings.detectionModels.occlusion) {
-        // snapshotFaceParams already includes visibility data,
-        // but if faceLandmarker is disabled we still need to run it for occlusion
         if (!result.detectors.faceLandmarker || result.detectors.faceLandmarker.error) {
           try {
             const snap = await snapshotFaceParams(videoEl, frameNumber)
             result.detectors.occlusion = {
               faceCount: snap.faceCount,
-              faces: snap.faces.map(f => ({
-                index: f.index,
-                visibility: f.visibility,
-              })),
+              faces: snap.faces.map(f => ({ index: f.index, visibility: f.visibility })),
             }
           } catch (err) {
             result.detectors.occlusion = { error: err.message }
           }
         } else {
-          // Extract visibility from the already-run faceLandmarker snapshot
           const snap = result.detectors.faceLandmarker
           result.detectors.occlusion = {
             faceCount: snap.faceCount,
-            faces: snap.faces.map(f => ({
-              index: f.index,
-              visibility: f.visibility,
-            })),
+            faces: snap.faces.map(f => ({ index: f.index, visibility: f.visibility })),
           }
-        }
-      }
-
-      // TransNetV2 - run on ~30 frames centered around current frame
-      if (state.settings.detectionModels.transnetv2) {
-        try {
-          const totalFrames = state.video.totalFrames || 0
-          const halfWindow = 15
-          const snapStart = Math.max(0, frameNumber - halfWindow)
-          const snapEnd = Math.min(totalFrames - 1, frameNumber + halfWindow)
-          const snapRange = [snapStart, snapEnd]
-          const snapResult = await transnetDetect(videoEl, snapRange, state.settings.transnetThreshold)
-          result.detectors.transnetv2 = {
-            frameRange: snapRange,
-            status: snapResult.summary?.status,
-            transitionsFound: (snapResult.rejectedRanges || []).length,
-            rejectedRanges: snapResult.rejectedRanges || [],
-          }
-        } catch (err) {
-          result.detectors.transnetv2 = { error: err.message }
         }
       }
 

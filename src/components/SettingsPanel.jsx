@@ -6,7 +6,7 @@ const TRIM_FIELDS = [
 ]
 
 const QUALITY_GATES_FIELDS = [
-  { key: 'transnetThreshold',  label: 'TransNet Threshold %', type: 'number', min: 0, max: 100 },
+  { key: 'dissolveThreshold',  label: 'Dissolve Threshold %', type: 'number', min: 0, max: 100 },
   { key: 'maxFaceYaw',         label: 'Max Face Yaw (degrees)', type: 'number', min: 0 },
   { key: 'maxFacePitch',       label: 'Max Face Pitch (degrees)', type: 'number', min: 0 },
   { key: 'maxFaceRoll',        label: 'Max Face Roll (degrees)', type: 'number', min: 0 },
@@ -20,11 +20,11 @@ const DEFAULT_SETTINGS = {
   detectionTestStartFrame: 0,
   detectionTestEndFrame: null,
   detectionModels: {
-    transnetv2: true,
+    dissolve: true,
     faceLandmarker: true,
     occlusion: true,
   },
-  transnetThreshold: 50,
+  dissolveThreshold: 50,
   maxFaceYaw: 30,
   maxFacePitch: 20,
   maxFaceRoll: 20,
@@ -97,7 +97,6 @@ export default function SettingsPanel({ onClose }) {
           </select>
         </div>
 
-        {/* Mode descriptions */}
         <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7, padding: '2px 0' }}>
           {settings.audioMode === 'SYNC' && '▸ Audio synced with video. Fade in/out at segment boundaries to prevent clicks.'}
           {settings.audioMode === 'Mute' && '▸ Output video will have no audio track.'}
@@ -106,16 +105,15 @@ export default function SettingsPanel({ onClose }) {
 
         <div className="section-divider">Quality Gates</div>
 
-        {/* Detection Models Checkboxes */}
         <div style={{ marginBottom: '8px' }}>
           <div className="form-row">
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
-                checked={settings.detectionModels?.transnetv2 ?? true}
-                onChange={() => updateDetectionModel('transnetv2')}
+                checked={settings.detectionModels?.dissolve ?? true}
+                onChange={() => updateDetectionModel('dissolve')}
               />
-              <span className="form-label" style={{ margin: 0 }}>TransNetV2</span>
+              <span className="form-label" style={{ margin: 0 }}>Dissolve / Crossfade</span>
             </label>
           </div>
           <div className="form-row">
@@ -140,7 +138,6 @@ export default function SettingsPanel({ onClose }) {
           </div>
         </div>
 
-        {/* Quality Gates Threshold Fields */}
         {QUALITY_GATES_FIELDS.map(f => (
           <div key={f.key} className="form-row">
             <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
@@ -156,7 +153,6 @@ export default function SettingsPanel({ onClose }) {
           </div>
         ))}
 
-        {/* Live trim summary */}
         {trimSegments.length > 0 && (
           <>
             <div className="section-divider">Active Trim Segments ({trimSegments.length})</div>

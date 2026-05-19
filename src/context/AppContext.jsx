@@ -14,11 +14,11 @@ const initialState = {
     detectionTestStartFrame: 0,
     detectionTestEndFrame: null,
     detectionModels: {
-      transnetv2: true,
+      dissolve: true,
       faceLandmarker: true,
       occlusion: true,
     },
-    transnetThreshold: 50,
+    dissolveThreshold: 50,
     maxFaceYaw: 30,
     maxFacePitch: 20,
     maxFaceRoll: 20,
