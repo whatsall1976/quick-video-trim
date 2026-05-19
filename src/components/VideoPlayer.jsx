@@ -24,8 +24,8 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
     let timeoutId
     const loop = () => {
       const targetTime = playback.currentFrame / (video.fps || 30)
-      // Only seek if significantly out of sync (> 3 frames) to avoid hammering decoder
-      if (Math.abs(vid.currentTime - targetTime) > 0.1) {
+      // Only seek when paused (for scrubbing). During playback, let video play naturally.
+      if (!playback.isPlaying && Math.abs(vid.currentTime - targetTime) > 0.01) {
         vid.currentTime = targetTime
       }
       draw()

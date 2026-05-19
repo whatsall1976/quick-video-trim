@@ -9,7 +9,6 @@ export function useVideoPlayback(videoRef) {
   const { state, dispatch, toast } = useApp()
   const { video, playback } = state
   const rafRef = useRef(null)
-  const lastTimestampRef = useRef(null)
   const shiftStepRef = useRef(1)
   const frameRef = useRef(playback.currentFrame)
   const totalFramesRef = useRef(video.totalFrames)
@@ -30,43 +29,46 @@ export function useVideoPlayback(videoRef) {
   fpsRef.current = video.fps
   speedRef.current = playback.playbackSpeed
 
-  // RAF playback loop — uses refs only to avoid recreating on every state change
-  const tick = useCallback((timestamp) => {
-    if (!lastTimestampRef.current) lastTimestampRef.current = timestamp
-    const elapsed = timestamp - lastTimestampRef.current
-    const frameDuration = 1000 / ((fpsRef.current || 30) * (speedRef.current || 1))
+  // Sync frame counter to video's actual playback position
+  const tick = useCallback(() => {
+    const vid = videoRef?.current
+    if (!vid) return
 
-    if (elapsed >= frameDuration) {
-      lastTimestampRef.current = timestamp
-      const next = frameRef.current + 1
-      if (next >= totalFramesRef.current) {
-        dispatch({ type: 'SET_PLAYING', payload: false })
-      } else {
-        dispatch({ type: 'SET_FRAME', payload: next })
-      }
+    const frameFromVideo = Math.round(vid.currentTime * (fpsRef.current || 30))
+    if (frameFromVideo !== frameRef.current && frameFromVideo < totalFramesRef.current) {
+      dispatch({ type: 'SET_FRAME', payload: frameFromVideo })
     }
-    rafRef.current = requestAnimationFrame(tick)
-  }, [dispatch])
 
-  // Start/stop RAF
+    // Check if reached end
+    if (vid.ended) {
+      dispatch({ type: 'SET_PLAYING', payload: false })
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+  }, [dispatch, videoRef])
+
+  // Start/stop playback and RAF sync loop
   useEffect(() => {
+    const vid = videoRef?.current
+    if (!vid) return
+
     if (playback.isPlaying) {
-      lastTimestampRef.current = null
+      vid.play().catch(err => console.error('[DEBUG] Failed to play:', err))
       rafRef.current = requestAnimationFrame(tick)
     } else {
+      vid.pause()
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
-  }, [playback.isPlaying, tick])
+  }, [playback.isPlaying, tick, videoRef])
 
-  // Sync video element to current frame
+  // Sync video element to current frame (only when paused for scrubbing)
   useEffect(() => {
     const vid = videoRef?.current
-    if (!vid || !video.fps) return
+    if (!vid || !video.fps || playback.isPlaying) return
     const targetTime = playback.currentFrame / video.fps
-    // Only seek if significantly out of sync (> 3 frames) to avoid hammering decoder
-    if (Math.abs(vid.currentTime - targetTime) > 0.1) {
+    if (Math.abs(vid.currentTime - targetTime) > 0.01) {
       vid.currentTime = targetTime
     }
   }, [playback.currentFrame, playback.isPlaying, video.fps, videoRef])
