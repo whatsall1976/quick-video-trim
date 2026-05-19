@@ -223,10 +223,21 @@ export default function DetectorPanel({ videoRef, onClose }) {
               <div style={{ color: 'var(--danger)' }}>Occlusion: {snapshotResult.detectors.occlusion.error}</div>
             )}
 
-            {snapshotResult.detectors.transnetv2 && (
-              <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                TransNetV2: {snapshotResult.detectors.transnetv2.note}
+            {snapshotResult.detectors.transnetv2 && !snapshotResult.detectors.transnetv2.error && (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontWeight: 500, color: 'var(--accent)' }}>TransNetV2</div>
+                <div>Range: {snapshotResult.detectors.transnetv2.frameRange?.[0]}-{snapshotResult.detectors.transnetv2.frameRange?.[1]}</div>
+                <div>Status: {snapshotResult.detectors.transnetv2.status}</div>
+                <div>Transitions: {snapshotResult.detectors.transnetv2.transitionsFound}</div>
+                {(snapshotResult.detectors.transnetv2.rejectedRanges || []).map((r, i) => (
+                  <div key={i} style={{ paddingLeft: 8, color: 'var(--warning)' }}>
+                    frames {r.startFrame}-{r.endFrame} (score: {Number.isFinite(r.score) ? r.score.toFixed(3) : '?'})
+                  </div>
+                ))}
               </div>
+            )}
+            {snapshotResult.detectors.transnetv2?.error && (
+              <div style={{ color: 'var(--danger)' }}>TransNetV2: {snapshotResult.detectors.transnetv2.error}</div>
             )}
           </div>
         )}

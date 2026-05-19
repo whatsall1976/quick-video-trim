@@ -35,7 +35,8 @@ export async function transnetDetect(videoElement, frameRange, threshold) {
       frames.push(blob)
     }
 
-    // Send frames to server for scenedetect analysis
+    // Send frames to server for TransNetV2 analysis
+    console.log(`[TransNet] Extracted ${frames.length} frames, sending to server (threshold=${threshold})`)
     const formData = new FormData()
     formData.append('threshold', threshold)
     formData.append('startFrame', startFrame)
@@ -47,7 +48,7 @@ export async function transnetDetect(videoElement, frameRange, threshold) {
     const response = await fetch('http://127.0.0.1:8765/detect-transitions-frames', {
       method: 'POST',
       body: formData
-    }).catch(() => null)
+    }).catch((err) => { console.error('[TransNet] Fetch failed:', err); return null })
 
     if (!response) {
       return {
@@ -62,6 +63,7 @@ export async function transnetDetect(videoElement, frameRange, threshold) {
     }
 
     const result = await response.json()
+    console.log('[TransNet] Server response:', JSON.stringify(result, null, 2))
 
     return {
       rejectedRanges: result.rejectedRanges || [],

@@ -185,9 +185,24 @@ export function useQualityDetection(videoRef) {
         }
       }
 
-      // TransNetV2 - N/A for single frame (needs frame sequence)
+      // TransNetV2 - run on ~30 frames centered around current frame
       if (state.settings.detectionModels.transnetv2) {
-        result.detectors.transnetv2 = { note: 'TransNetV2 requires frame sequence, not applicable for single-frame snapshot' }
+        try {
+          const totalFrames = state.video.totalFrames || 0
+          const halfWindow = 15
+          const snapStart = Math.max(0, frameNumber - halfWindow)
+          const snapEnd = Math.min(totalFrames - 1, frameNumber + halfWindow)
+          const snapRange = [snapStart, snapEnd]
+          const snapResult = await transnetDetect(videoEl, snapRange, state.settings.transnetThreshold)
+          result.detectors.transnetv2 = {
+            frameRange: snapRange,
+            status: snapResult.summary?.status,
+            transitionsFound: (snapResult.rejectedRanges || []).length,
+            rejectedRanges: snapResult.rejectedRanges || [],
+          }
+        } catch (err) {
+          result.detectors.transnetv2 = { error: err.message }
+        }
       }
 
       dispatch({ type: 'SET_SNAPSHOT_RESULT', payload: result })

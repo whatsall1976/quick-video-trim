@@ -1,7 +1,11 @@
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("detection-server")
 
 import cv2
 import numpy as np
@@ -58,7 +62,10 @@ async def detect_transitions_frames(
     return {"status": "missing", "message": "TransNetV2 not available", "rejectedRanges": []}
 
   try:
+    log.info(f"[TransNetV2] Received {len(frames)} frames, threshold={threshold}, startFrame={startFrame}")
+
     if not frames:
+      log.info("[TransNetV2] No frames received")
       return {"status": "ok", "rejectedRanges": []}
 
     # Decode all frames into numpy array
@@ -72,7 +79,10 @@ async def detect_transitions_frames(
         img_resized = cv2.resize(img_rgb, (48, 27))
         decoded.append(img_resized)
 
+    log.info(f"[TransNetV2] Decoded {len(decoded)} of {len(frames)} frames")
+
     if len(decoded) < 2:
+      log.info("[TransNetV2] Less than 2 frames decoded, skipping")
       return {"status": "ok", "rejectedRanges": []}
 
     # Run TransNetV2
@@ -114,9 +124,11 @@ async def detect_transitions_frames(
         "reason": "Transition / crossfade",
       })
 
+    log.info(f"[TransNetV2] Done in {dt_ms}ms. Scores: min={predictions.min():.4f} max={predictions.max():.4f} mean={predictions.mean():.4f}. threshold_norm={threshold_norm}. Found {len(rejected_ranges)} transitions")
     return {"status": "ok", "rejectedRanges": rejected_ranges, "ms": dt_ms}
 
   except Exception as e:
+    log.error(f"[TransNetV2] Error: {e}", exc_info=True)
     return {"status": "error", "message": str(e), "rejectedRanges": []}
 
 
