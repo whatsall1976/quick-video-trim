@@ -59,9 +59,7 @@ export function useQualityDetection(videoRef) {
 
         if (state.settings.detectionModels.transnetv2) {
           detectorPromises.push(
-            transnetDetect(state.video.file, frameRange, state.settings.transnetThreshold, (progress) =>
-              dispatch({ type: 'SET_DETECTION_PROGRESS', payload: Math.round(progress * 100) })
-            ).then((result) => ({
+            transnetDetect(videoEl, frameRange, state.settings.transnetThreshold).then((result) => ({
               key: 'transnetv2',
               label: 'TransNetV2',
               enabled: true,
@@ -82,16 +80,11 @@ export function useQualityDetection(videoRef) {
 
         if (state.settings.detectionModels.faceLandmarker) {
           detectorPromises.push(
-            faceLandmarkerDetect(
-              state.video.file,
-              frameRange,
-              {
-                maxFaceYaw: state.settings.maxFaceYaw,
-                maxFacePitch: state.settings.maxFacePitch,
-                maxFaceRoll: state.settings.maxFaceRoll,
-              },
-              (progress) => dispatch({ type: 'SET_DETECTION_PROGRESS', payload: Math.round(progress * 100) })
-            ).then((result) => ({
+            faceLandmarkerDetect(videoEl, frameRange, {
+              maxFaceYaw: state.settings.maxFaceYaw,
+              maxFacePitch: state.settings.maxFacePitch,
+              maxFaceRoll: state.settings.maxFaceRoll,
+            }).then((result) => ({
               key: 'faceLandmarker',
               label: 'Face Landmarker',
               enabled: true,
