@@ -1,11 +1,11 @@
 import { useApp } from '../context/AppContext'
 import { useMarkers } from '../hooks/useMarkers'
-import { useYOLODetection } from '../hooks/useYOLODetection'
+import { useQualityDetection } from '../hooks/useQualityDetection'
 
 export default function DetectorPanel({ videoRef, onClose }) {
   const { state, dispatch, toast } = useApp()
   const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId, settings } = state
-  const { runDetectionPipeline } = useYOLODetection(videoRef)
+  const { runDetectionPipeline } = useQualityDetection(videoRef)
   const { updateMarker, selectMarker } = useMarkers()
 
   const flagged = markers.filter(m => m.flagged)
@@ -76,7 +76,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
 
   const removeAllFlagged = () => {
     dispatch({ type: 'SET_MARKERS', payload: markers.filter(m => !m.flagged) })
-    toast('Flagged overlap markers removed', 'info', 1500)
+    toast('Flagged markers removed', 'info', 1500)
   }
 
   const removeAllAuto = () => {
@@ -84,24 +84,28 @@ export default function DetectorPanel({ videoRef, onClose }) {
     toast('Auto-detected markers removed', 'info', 1500)
   }
 
-  const { thresholdCrossings = [], sizeJumps = [], movements = [], overlaps = [] } = detectionResults
-  const details = detectionResults.details
+  const { modelRuns = [], rejectedRanges = [] } = detectionResults
   const hasRunResults = Array.isArray(detectionResults.frameRange)
-  const hasDetectionResults = hasRunResults || thresholdCrossings.length > 0 || sizeJumps.length > 0 || movements.length > 0 || overlaps.length > 0
-  const pct = (value) => Number.isFinite(value) ? `${Math.round(value)}%` : '-'
-  const ratioPct = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-'
+  const hasDetectionResults = hasRunResults || rejectedRanges.length > 0
   const goToFrame = (frameNumber) => {
     dispatch({ type: 'SET_FRAME', payload: frameNumber })
     dispatch({ type: 'SET_PLAYING', payload: false })
   }
-  const detailRowStyle = {
+  const statusColor = (status) => {
+    if (status === 'ok') return 'var(--success)'
+    if (status === 'missing') return 'var(--warning)'
+    if (status === 'error') return 'var(--danger)'
+    return 'var(--text-secondary)'
+  }
+  const rangeRowStyle = {
     fontSize: 11,
     color: 'var(--text-secondary)',
-    padding: '6px 8px',
+    padding: '8px 10px',
     background: 'var(--bg-elevated)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius-sm)',
-    lineHeight: 1.5,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   }
 
   return (
@@ -164,7 +168,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
           <button
             className="btn"
             style={{ flex: 1 }}
-            onClick={() => runDetectionPipeline({ mode: 'test' })}
+            onClick={() => runDetectionPipeline('test')}
             disabled={!video.file || isDetecting}
             id="test-detection-btn"
           >
@@ -173,7 +177,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
           <button
             className="btn btn-primary"
             style={{ flex: 1 }}
-            onClick={() => runDetectionPipeline({ mode: 'full' })}
+            onClick={() => runDetectionPipeline('full')}
             disabled={!video.file || isDetecting}
             id="run-detection-btn"
           >
@@ -190,7 +194,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
           </div>
         )}
 
-        {!isDetecting && thresholdCrossings.length === 0 && sizeJumps.length === 0 && movements.length === 0 && !video.file && (
+        {!isDetecting && rejectedRanges.length === 0 && !video.file && (
           <div className="empty-state">Load a video then click Run Detection to auto-place markers.</div>
         )}
 
@@ -202,96 +206,92 @@ export default function DetectorPanel({ videoRef, onClose }) {
                 {detectionResults.runMode === 'test' ? 'Test' : 'Real'} run frames {detectionResults.frameRange[0]}-{detectionResults.frameRange[1]}
               </div>
             )}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {[
-                { label: 'Face events', count: thresholdCrossings.length, color: 'var(--accent)' },
-                { label: 'Size jumps', count: sizeJumps.length, color: 'var(--warning)' },
-                { label: 'Movements', count: movements.length, color: 'var(--success)' },
-                { label: 'Overlaps', count: overlaps.length, color: 'var(--danger)' },
-              ].map(({ label, count, color }) => (
-                <div key={label} style={{
-                  flex: '1 0 40%', background: 'var(--bg-elevated)',
-                  borderRadius: 'var(--radius-sm)', padding: '8px 10px',
-                  border: '1px solid var(--border)',
-                }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color }}>{count}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
+
+            {/* Model Status Cards */}
+            {modelRuns.length > 0 && (
+              <>
+                <div className="section-divider">Model Status</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {modelRuns.map((model) => {
+                    const rangeCount = (model.rejectedRanges || []).length
+                    const status = model.summary?.status || 'ok'
+                    return (
+                      <div
+                        key={model.key}
+                        style={{
+                          padding: '8px 10px',
+                          background: 'var(--bg-elevated)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={model.enabled}
+                          disabled={true}
+                          style={{ cursor: 'default' }}
+                        />
+                        <div style={{ flex: 1, fontSize: 12 }}>
+                          <div style={{ fontWeight: 500 }}>{model.label}</div>
+                          <div style={{ fontSize: 10, color: statusColor(status), fontWeight: 500 }}>
+                            {status.toUpperCase()}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {rangeCount} {rangeCount === 1 ? 'range' : 'ranges'}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              ))}
-            </div>
-            {details && (
-              <>
-                <div className="section-divider">Detection Details</div>
-                <div style={{ ...detailRowStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                  <div>Samples: {detectionResults.scannedFrames}</div>
-                  <div>Step: {details.sampleStep} frames</div>
-                  <div>Detected: {details.detectedFrames}</div>
-                  <div>Missing: {details.missingFrames}</div>
-                  <div>Candidate frames: {details.framesWithCandidates}</div>
-                  <div>Overlap frames: {details.framesWithOverlaps}</div>
-                  <div>Conf min/avg/max: {pct(details.confidence?.min)}/{pct(details.confidence?.avg)}/{pct(details.confidence?.max)}</div>
-                  <div>Quality threshold: {pct(details.thresholds?.qualityThreshold)}</div>
-                </div>
               </>
             )}
 
-            {thresholdCrossings.length > 0 && (
+            {/* Rejected Ranges List */}
+            {rejectedRanges.length > 0 && (
               <>
-                <div className="section-divider">Face Event Frames</div>
-                {thresholdCrossings.map((event, index) => (
-                  <div key={`${event.type}-${event.frameNumber}-${index}`} style={detailRowStyle}>
-                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(event.frameNumber)} title="Jump to frame">⤷</button>
-                    Frame {event.frameNumber}: {event.direction} / {event.type}, confidence {pct(event.previousConfidence)} to {pct(event.confidence)}, threshold {pct(event.threshold)}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {sizeJumps.length > 0 && (
-              <>
-                <div className="section-divider">Size Jump Frames</div>
-                {sizeJumps.map((jump, index) => (
-                  <div key={`${jump.frameNumber}-${index}`} style={detailRowStyle}>
-                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(jump.frameNumber)} title="Jump to frame">⤷</button>
-                    Frame {jump.frameNumber}: {pct(jump.percentChange)} area change, {jump.previousArea} to {jump.area}, threshold {pct(jump.threshold)}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {movements.length > 0 && (
-              <>
-                <div className="section-divider">Movement Frames</div>
-                {movements.map((move, index) => (
-                  <div key={`${move.frameNumber}-${index}`} style={detailRowStyle}>
-                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(move.frameNumber)} title="Jump to frame">⤷</button>
-                    Frame {move.frameNumber}: {pct(move.percentDisplacement)} movement, {move.displacementPixels}px / {move.faceWidth}px face width, threshold {pct(move.threshold)}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {overlaps.length > 0 && (
-              <>
-                <div className="section-divider">Overlap Ranges</div>
-                {overlaps.map((overlap, index) => (
-                  <div key={`${overlap.frameRange?.[0]}-${index}`} style={detailRowStyle}>
-                    <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(overlap.frameRange[0])} title="Jump to frame">⤷</button>
-                    Frames {overlap.frameRange[0]}-{overlap.frameRange[1]}: {overlap.sampleCount ?? overlap.frames?.length ?? 0} samples, max IoU {ratioPct(overlap.maxIou)}, small-face coverage {ratioPct(overlap.maxSmallFaceCoverage)}, center separation {ratioPct(overlap.maxCenterSeparation)}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {details?.samples?.length > 0 && (
-              <>
-                <div className="section-divider">Sample Frames</div>
-                <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {details.samples.map(sample => (
-                    <div key={sample.frameNumber} style={detailRowStyle}>
-                      <button className="icon-btn" style={{ float: 'right' }} onClick={() => goToFrame(sample.frameNumber)} title="Jump to frame">⤷</button>
-                      Frame {sample.frameNumber}: conf {pct(sample.confidence)}, faces {sample.detectedFaces}, candidates {sample.candidates}
-                      {sample.overlap && `, overlap IoU ${pct(sample.overlapIou)}, coverage ${pct(sample.overlapSmallFaceCoverage)}, separation ${pct(sample.overlapCenterSeparation)}`}
+                <div className="section-divider">Rejected Ranges ({rejectedRanges.length})</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                  {rejectedRanges.map((range, idx) => (
+                    <div
+                      key={`${range.startFrame}-${range.endFrame}-${idx}`}
+                      style={{
+                        ...rangeRowStyle,
+                        '&:hover': { background: 'var(--bg-elevated)', opacity: 0.8 },
+                      }}
+                      onClick={() => goToFrame(range.startFrame)}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'var(--bg-hover)'
+                        e.currentTarget.style.borderColor = 'var(--border-active)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'var(--bg-elevated)'
+                        e.currentTarget.style.borderColor = 'var(--border)'
+                      }}
+                    >
+                      <button
+                        className="icon-btn"
+                        style={{ float: 'right', fontSize: 12 }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          goToFrame(range.startFrame)
+                        }}
+                        title="Jump to frame"
+                      >
+                        ⤷
+                      </button>
+                      <div style={{ fontSize: 11, fontWeight: 500 }}>
+                        Frame {range.startFrame}-{range.endFrame}
+                      </div>
+                      <div style={{ fontSize: 10, marginTop: 3 }}>
+                        {range.reason}
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                        source: {range.source} {Number.isFinite(range.score) ? `[${range.score.toFixed(2)}]` : ''}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -316,18 +316,18 @@ export default function DetectorPanel({ videoRef, onClose }) {
           </>
         )}
 
-        {/* Flagged overlap review */}
+        {/* Flagged marker review */}
         {flagged.length > 0 && (
           <>
             <div className="section-divider" style={{ color: 'var(--warning)' }}>
-              ⚠ Flagged Overlaps ({flagged.length})
+              ⚠ Flagged Markers ({flagged.length})
             </div>
             <button
               className="btn btn-danger"
               style={{ width: '100%', fontSize: 11 }}
               onClick={removeAllFlagged}
             >
-              Remove All Overlap Markers
+              Remove All Flagged Markers
             </button>
             {flagged.map(m => (
               <div
@@ -339,31 +339,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
                 <div className="marker-dot flagged" />
                 <div className="marker-info">
                   <div className="marker-frame">Frame {m.frameNumber}</div>
-                  <div className="marker-meta">{m.reason ?? 'Multiple faces detected'}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 }}>
-                    <div className="form-row">
-                      <span className="form-label">Overlap start</span>
-                      <input
-                        className="form-input"
-                        type="number"
-                        min={0}
-                        max={Math.max(0, video.totalFrames - 1)}
-                        defaultValue={m.overlapStartFrame ?? m.frameNumber}
-                        onBlur={e => updateOverlapFrame(m, 'overlapStartFrame', e.target.value)}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <span className="form-label">Overlap end</span>
-                      <input
-                        className="form-input"
-                        type="number"
-                        min={0}
-                        max={Math.max(0, video.totalFrames - 1)}
-                        defaultValue={m.overlapEndFrame ?? m.frameNumber}
-                        onBlur={e => updateOverlapFrame(m, 'overlapEndFrame', e.target.value)}
-                      />
-                    </div>
-                  </div>
+                  <div className="marker-meta">{m.reason ?? 'Quality issue detected'}</div>
                 </div>
                 <div className="marker-actions">
                   <button
@@ -380,14 +356,15 @@ export default function DetectorPanel({ videoRef, onClose }) {
                     onClick={() => { keepMarker(m.id); toast(`Marker ${m.id} accepted`, 'success', 1500) }}
                     title="Keep marker"
                   >
-                    ✓
+                    Keep
                   </button>
                   <button
-                    className="icon-btn"
+                    className="btn"
+                    style={{ fontSize: 11, padding: '3px 8px', color: 'var(--danger)', borderColor: 'var(--danger)' }}
                     onClick={() => { removeMarker(m.id); toast(`Marker removed`, 'info', 1200) }}
                     title="Remove marker"
                   >
-                    ✕
+                    Remove
                   </button>
                 </div>
               </div>
