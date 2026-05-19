@@ -7,9 +7,23 @@ let markerId = 1000
 export function useYOLODetection(videoRef) {
   const { state, dispatch, toast } = useApp()
 
-  const runDetectionPipeline = useCallback(async () => {
+  const runDetectionPipeline = useCallback(async ({ mode = 'full' } = {}) => {
     const videoEl = videoRef?.current
     if (!videoEl || !state.video.file) { toast('No video loaded', 'warning'); return }
+    const isTestRun = mode === 'test'
+    const fps = state.video.fps || 30
+    const totalFrames = state.video.totalFrames || 0
+    const maxFrame = Math.max(0, totalFrames - 1)
+    const testStart = Math.min(Math.max(0, Math.round(state.settings.detectionTestStartFrame ?? 0)), maxFrame)
+    const defaultTestEnd = Math.min(maxFrame, testStart + Math.max(1, Math.round((state.settings.detectionTestSeconds ?? 10) * fps)) - 1)
+    const testEnd = Number.isFinite(state.settings.detectionTestEndFrame)
+      ? Math.min(Math.max(0, Math.round(state.settings.detectionTestEndFrame)), maxFrame)
+      : defaultTestEnd
+
+    if (isTestRun && testStart > testEnd) {
+      toast('Test start frame must be before end frame', 'warning', 2200)
+      return
+    }
 
     dispatch({ type: 'SET_DETECTING', payload: true })
     dispatch({ type: 'SET_DETECTION_PROGRESS', payload: 0 })
@@ -23,12 +37,18 @@ export function useYOLODetection(videoRef) {
         state.video,
         state.settings,
         (progress) => dispatch({ type: 'SET_DETECTION_PROGRESS', payload: Math.round(progress * 100) }),
-        () => false
+        () => false,
+        isTestRun ? { mode, startFrame: testStart, endFrame: testEnd } : { mode }
       )
 
       dispatch({ type: 'SET_DETECTION_RESULTS', payload: results })
+      const total = results.thresholdCrossings.length + results.sizeJumps.length + results.movements.length
 
-      // Build auto-markers from all event types
+      if (isTestRun) {
+        toast(`Test run complete: frames ${testStart}-${testEnd}, ${total} events, ${results.overlaps.length} overlaps.`, 'success', 5000)
+        return
+      }
+
       const newMarkers = []
       const addM = (frameNumber, reason, flagged = false, extra = {}) => {
         newMarkers.push({
@@ -64,7 +84,6 @@ export function useYOLODetection(videoRef) {
       ]
       dispatch({ type: 'SET_MARKERS', payload: merged })
 
-      const total = results.thresholdCrossings.length + results.sizeJumps.length + results.movements.length
       toast(`Detection complete. ${total} events found, ${results.overlaps.length} overlaps flagged.`, 'success', 5000)
     } catch (err) {
       console.error(err)

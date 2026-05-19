@@ -9,6 +9,31 @@ const FIELDS = [
   { key: 'qualityThreshold',     label: 'Quality Drop Threshold %',    type: 'number', min: 0, max: 100 },
 ]
 
+const OVERLAP_FIELDS = [
+  { key: 'overlapNmsIou',            label: 'Overlap NMS IoU %',          type: 'number', min: 0, max: 100 },
+  { key: 'overlapIoUThreshold',      label: 'Overlap IoU Threshold %',    type: 'number', min: 0, max: 100 },
+  { key: 'overlapSmallFaceCoverage', label: 'Small Face Coverage %',      type: 'number', min: 0, max: 100 },
+  { key: 'overlapCenterSeparation',  label: 'Center Separation %',        type: 'number', min: 0, max: 200 },
+  { key: 'overlapMinSamples',        label: 'Min Overlap Samples',        type: 'number', min: 1, max: 30 },
+]
+
+const DEFAULT_SETTINGS = {
+  trmWin: 31,
+  trmIntv: 90,
+  confidenceThreshold: 50,
+  sizeJumpThreshold: 10,
+  faceMovementThreshold: 30,
+  qualityThreshold: 50,
+  detectionTestSeconds: 10,
+  detectionTestStartFrame: 0,
+  detectionTestEndFrame: null,
+  overlapNmsIou: 55,
+  overlapIoUThreshold: 12,
+  overlapSmallFaceCoverage: 25,
+  overlapCenterSeparation: 35,
+  overlapMinSamples: 2,
+}
+
 export default function SettingsPanel({ onClose }) {
   const { state, dispatch } = useApp()
   const { settings, trimSegments } = state
@@ -19,6 +44,9 @@ export default function SettingsPanel({ onClose }) {
       val = parseInt(raw, 10)
       if (isNaN(val) || val < 1) return
       if (val % 2 === 0) val += 1 // enforce odd
+    } else if (key === 'overlapMinSamples') {
+      val = parseInt(raw, 10)
+      if (isNaN(val) || val < 1) return
     } else if (key !== 'audioMode') {
       val = parseFloat(raw)
       if (isNaN(val)) return
@@ -51,6 +79,22 @@ export default function SettingsPanel({ onClose }) {
 
         <div className="section-divider">Detection Thresholds</div>
         {FIELDS.slice(2).map(f => (
+          <div key={f.key} className="form-row">
+            <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
+            <input
+              id={`setting-${f.key}`}
+              className="form-input"
+              type="number"
+              value={settings[f.key]}
+              min={f.min}
+              max={f.max}
+              onChange={e => update(f.key, e.target.value)}
+            />
+          </div>
+        ))}
+
+        <div className="section-divider">Overlap Detection</div>
+        {OVERLAP_FIELDS.map(f => (
           <div key={f.key} className="form-row">
             <label className="form-label" htmlFor={`setting-${f.key}`}>{f.label}</label>
             <input
@@ -109,10 +153,7 @@ export default function SettingsPanel({ onClose }) {
         <button
           className="btn"
           style={{ width: '100%', marginTop: 4, fontSize: 11 }}
-          onClick={() => dispatch({ type: 'UPDATE_SETTINGS', payload: {
-            trmWin: 31, trmIntv: 90, confidenceThreshold: 50,
-            sizeJumpThreshold: 10, faceMovementThreshold: 30, qualityThreshold: 50,
-          }})}
+          onClick={() => dispatch({ type: 'UPDATE_SETTINGS', payload: DEFAULT_SETTINGS })}
         >
           Reset to Defaults
         </button>

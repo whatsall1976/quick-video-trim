@@ -4,12 +4,19 @@ import { useYOLODetection } from '../hooks/useYOLODetection'
 
 export default function DetectorPanel({ videoRef, onClose }) {
   const { state, dispatch, toast } = useApp()
-  const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId } = state
+  const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId, settings } = state
   const { runDetectionPipeline } = useYOLODetection(videoRef)
   const { updateMarker, selectMarker } = useMarkers()
 
   const flagged = markers.filter(m => m.flagged)
   const auto = markers.filter(m => m.autoDetected)
+  const maxFrame = Math.max(0, (video.totalFrames || 0) - 1)
+  const testStartFrame = Number.isFinite(settings.detectionTestStartFrame) ? settings.detectionTestStartFrame : 0
+  const defaultTestEndFrame = Math.min(
+    maxFrame,
+    testStartFrame + Math.max(1, Math.round((settings.detectionTestSeconds ?? 10) * (video.fps || 30))) - 1
+  )
+  const testEndFrame = Number.isFinite(settings.detectionTestEndFrame) ? settings.detectionTestEndFrame : defaultTestEndFrame
 
   const keepMarker = (id) => {
     dispatch({ type: 'UPDATE_MARKER', payload: { id, flagged: false } })
@@ -23,6 +30,25 @@ export default function DetectorPanel({ videoRef, onClose }) {
     selectMarker(m.id)
     dispatch({ type: 'SET_FRAME', payload: m.frameNumber })
     dispatch({ type: 'SET_PLAYING', payload: false })
+  }
+
+  const updateTestFrame = (key, value) => {
+    if (value === '' && key === 'detectionTestEndFrame') {
+      dispatch({ type: 'UPDATE_SETTINGS', payload: { [key]: null } })
+      return
+    }
+
+    const frame = parseInt(value, 10)
+    if (isNaN(frame)) return
+    if (frame < 0 || frame > maxFrame) {
+      toast('Test frame out of bounds', 'error', 1800)
+      return
+    }
+    dispatch({ type: 'UPDATE_SETTINGS', payload: { [key]: frame } })
+  }
+
+  const setTestEndToDefault = () => {
+    dispatch({ type: 'UPDATE_SETTINGS', payload: { detectionTestEndFrame: defaultTestEndFrame } })
   }
 
   const updateOverlapFrame = (m, key, value) => {
@@ -68,15 +94,75 @@ export default function DetectorPanel({ videoRef, onClose }) {
         <button className="panel-close" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="panel-body">
-        <button
-          className="btn btn-primary"
-          style={{ width: '100%' }}
-          onClick={runDetectionPipeline}
-          disabled={!video.file || isDetecting}
-          id="run-detection-btn"
-        >
-          {isDetecting ? `⏳ Detecting… ${detectionProgress}%` : '🔍 Run Detection'}
-        </button>
+        <div className="section-divider">Test Run Range</div>
+        <div className="form-row">
+          <label className="form-label" htmlFor="test-start-frame">Start frame</label>
+          <input
+            id="test-start-frame"
+            className="form-input"
+            type="number"
+            min={0}
+            max={maxFrame}
+            value={testStartFrame}
+            onChange={e => updateTestFrame('detectionTestStartFrame', e.target.value)}
+            disabled={!video.file || isDetecting}
+          />
+        </div>
+        <div className="form-row">
+          <label className="form-label" htmlFor="test-end-frame">End frame</label>
+          <input
+            id="test-end-frame"
+            className="form-input"
+            type="number"
+            min={0}
+            max={maxFrame}
+            value={testEndFrame}
+            onChange={e => updateTestFrame('detectionTestEndFrame', e.target.value)}
+            disabled={!video.file || isDetecting}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className="btn"
+            style={{ flex: 1, fontSize: 11 }}
+            onClick={setTestEndToDefault}
+            disabled={!video.file || isDetecting}
+          >
+            Default 10s End
+          </button>
+          <button
+            className="btn"
+            style={{ flex: 1, fontSize: 11 }}
+            onClick={() => dispatch({
+              type: 'UPDATE_SETTINGS',
+              payload: { detectionTestStartFrame: Math.min(state.playback.currentFrame, maxFrame), detectionTestEndFrame: null },
+            })}
+            disabled={!video.file || isDetecting}
+          >
+            Start at Current
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn"
+            style={{ flex: 1 }}
+            onClick={() => runDetectionPipeline({ mode: 'test' })}
+            disabled={!video.file || isDetecting}
+            id="test-detection-btn"
+          >
+            {isDetecting ? `Detecting ${detectionProgress}%` : 'Test Run'}
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            onClick={() => runDetectionPipeline({ mode: 'full' })}
+            disabled={!video.file || isDetecting}
+            id="run-detection-btn"
+          >
+            {isDetecting ? `Detecting ${detectionProgress}%` : 'Real Run'}
+          </button>
+        </div>
 
         {isDetecting && (
           <div>
@@ -94,6 +180,11 @@ export default function DetectorPanel({ videoRef, onClose }) {
         {hasDetectionResults && (
           <>
             <div className="section-divider">Detection Results</div>
+            {Array.isArray(detectionResults.frameRange) && (
+              <div className="detection-status">
+                {detectionResults.runMode === 'test' ? 'Test' : 'Real'} run frames {detectionResults.frameRange[0]}-{detectionResults.frameRange[1]}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {[
                 { label: 'Face events', count: thresholdCrossings.length, color: 'var(--accent)' },

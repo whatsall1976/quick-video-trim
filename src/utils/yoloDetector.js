@@ -1,10 +1,13 @@
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:8765'
 const serverUrl = (import.meta?.env?.VITE_YOLO_SERVER_URL || DEFAULT_SERVER_URL).replace(/\/+$/, '')
-const OVERLAP_NMS_IOU = 0.85
-const DUPLICATE_IOU_THRESHOLD = 0.88
-const DUPLICATE_CENTER_RATIO = 0.18
-const OVERLAP_MIN_IOU = 0.08
-const OVERLAP_MIN_SMALLER_AREA = 0.16
+const DEFAULT_OVERLAP_NMS_IOU = 0.55
+const DUPLICATE_IOU_THRESHOLD = 0.42
+const DUPLICATE_CENTER_RATIO = 0.45
+const DUPLICATE_CONTAINMENT_THRESHOLD = 0.65
+const DEFAULT_DISTINCT_CENTER_RATIO = 0.35
+const DEFAULT_OVERLAP_MIN_IOU = 0.12
+const DEFAULT_OVERLAP_MIN_SMALLER_AREA = 0.25
+const DEFAULT_MIN_OVERLAP_SAMPLES = 2
 
 let serverReady = false
 let serverModel = null
@@ -55,10 +58,34 @@ function centerDistance(a, b) {
   return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
 }
 
+function minFaceSide(a, b) {
+  return Math.max(1, Math.min(a.width, a.height, b.width, b.height))
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function percentSetting(value, fallback, max = 100) {
+  return Number.isFinite(value) ? clamp(value, 0, max) / 100 : fallback
+}
+
+function overlapConfig(settings) {
+  return {
+    nmsIou: percentSetting(settings.overlapNmsIou, DEFAULT_OVERLAP_NMS_IOU),
+    minIou: percentSetting(settings.overlapIoUThreshold, DEFAULT_OVERLAP_MIN_IOU),
+    minSmallerArea: percentSetting(settings.overlapSmallFaceCoverage, DEFAULT_OVERLAP_MIN_SMALLER_AREA),
+    distinctCenterRatio: percentSetting(settings.overlapCenterSeparation, DEFAULT_DISTINCT_CENTER_RATIO, 200),
+    minSamples: Number.isFinite(settings.overlapMinSamples)
+      ? Math.max(1, Math.round(settings.overlapMinSamples))
+      : DEFAULT_MIN_OVERLAP_SAMPLES,
+  }
+}
+
 function isDuplicateFace(a, b) {
   const { iou, smallerOverlap } = boxMetrics(a, b)
-  const centerLimit = Math.min(a.width, a.height, b.width, b.height) * DUPLICATE_CENTER_RATIO
-  return iou >= DUPLICATE_IOU_THRESHOLD || ((iou >= 0.65 || smallerOverlap >= 0.8) && centerDistance(a, b) <= centerLimit)
+  const closeCenters = centerDistance(a, b) <= minFaceSide(a, b) * DUPLICATE_CENTER_RATIO
+  return iou >= DUPLICATE_IOU_THRESHOLD || (smallerOverlap >= DUPLICATE_CONTAINMENT_THRESHOLD && closeCenters)
 }
 
 function dedupeFaceBoxes(boxes) {
@@ -69,11 +96,12 @@ function dedupeFaceBoxes(boxes) {
   return kept
 }
 
-function findOverlappingFacePair(boxes) {
+function findOverlappingFacePair(boxes, config) {
   for (let i = 0; i < boxes.length; i += 1) {
     for (let j = i + 1; j < boxes.length; j += 1) {
       const metrics = boxMetrics(boxes[i], boxes[j])
-      if (metrics.iou >= OVERLAP_MIN_IOU || metrics.smallerOverlap >= OVERLAP_MIN_SMALLER_AREA) {
+      const distinctCenters = centerDistance(boxes[i], boxes[j]) >= minFaceSide(boxes[i], boxes[j]) * config.distinctCenterRatio
+      if (distinctCenters && (metrics.iou >= config.minIou || metrics.smallerOverlap >= config.minSmallerArea)) {
         return { boxes: [boxes[i], boxes[j]], ...metrics }
       }
     }
@@ -81,16 +109,18 @@ function findOverlappingFacePair(boxes) {
   return null
 }
 
-function buildOverlapRanges(frames, sampleStep, totalFrames) {
+function buildOverlapRanges(frames, sampleStep, totalFrames, config) {
   const overlaps = []
   let inOverlap = null
 
   const closeOverlap = () => {
     if (!inOverlap) return
-    overlaps.push({
-      frameRange: [inOverlap.start, Math.min(totalFrames - 1, inOverlap.last + sampleStep - 1)],
-      frames: inOverlap.frames,
-    })
+    if (inOverlap.frames.length >= config.minSamples) {
+      overlaps.push({
+        frameRange: [inOverlap.start, Math.min(totalFrames - 1, inOverlap.last + sampleStep - 1)],
+        frames: inOverlap.frames,
+      })
+    }
     inOverlap = null
   }
 
@@ -134,12 +164,21 @@ export async function detectFrame(imageSource, { conf = 0.05, iou = null } = {})
   }))
 }
 
-export async function runDetection(videoEl, videoMeta, settings, onProgress, getAbort) {
+function clampFrame(frame, totalFrames) {
+  return clamp(Math.round(frame), 0, Math.max(0, totalFrames - 1))
+}
+
+export async function runDetection(videoEl, videoMeta, settings, onProgress, getAbort, options = {}) {
   const { fps, totalFrames, width, height } = videoMeta
   const { confidenceThreshold, sizeJumpThreshold, faceMovementThreshold, qualityThreshold } = settings
   const confThresh = confidenceThreshold / 100
   const qualThresh = qualityThreshold / 100
   const serverConf = Math.max(0.001, Math.min(confThresh, qualThresh, 0.25))
+  const overlap = overlapConfig(settings)
+  const startFrame = Number.isFinite(options.startFrame) ? clampFrame(options.startFrame, totalFrames) : 0
+  const endFrame = Number.isFinite(options.endFrame) ? clampFrame(options.endFrame, totalFrames) : Math.max(0, totalFrames - 1)
+  const scanStartFrame = Math.min(startFrame, endFrame)
+  const scanEndFrame = Math.max(startFrame, endFrame)
 
   const offscreen = document.createElement('canvas')
   offscreen.width = width || 640
@@ -153,16 +192,17 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
   let prevArea = null, prevCx = null, prevCy = null, prevW = null
   let wasAbove = null, wasAboveQual = null
   const sampleStep = Math.max(1, Math.floor(fps / 15))
+  const scanFrameCount = Math.max(1, scanEndFrame - scanStartFrame + 1)
 
-  for (let f = 0; f < totalFrames; f += sampleStep) {
+  for (let f = scanStartFrame; f <= scanEndFrame; f += sampleStep) {
     if (getAbort?.()) break
-    onProgress?.(f / totalFrames)
+    onProgress?.((f - scanStartFrame) / scanFrameCount)
     videoEl.currentTime = f / fps
     await new Promise(res => { videoEl.onseeked = res })
     ctx.drawImage(videoEl, 0, 0, offscreen.width, offscreen.height)
 
     let detected = []
-    try { detected = await detectFrame(offscreen, { conf: serverConf, iou: OVERLAP_NMS_IOU }) } catch { /* skip */ }
+    try { detected = await detectFrame(offscreen, { conf: serverConf, iou: overlap.nmsIou }) } catch { /* skip */ }
     const sortedDetected = detected.sort((a, b) => b.confidence - a.confidence)
     const best = sortedDetected[0] ?? null
     const overlapFaces = dedupeFaceBoxes(sortedDetected)
@@ -170,7 +210,7 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
       frameNumber: f,
       face: best,
       allFaces: sortedDetected,
-      overlap: findOverlappingFacePair(overlapFaces),
+      overlap: findOverlappingFacePair(overlapFaces, overlap),
     })
 
     const conf = best?.confidence ?? 0
@@ -203,11 +243,17 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
     } else { prevArea = null; prevCx = null; prevCy = null; prevW = null }
   }
 
-  const overlaps = buildOverlapRanges(faces, sampleStep, totalFrames)
+  const overlaps = buildOverlapRanges(faces, sampleStep, totalFrames, overlap)
   onProgress?.(1)
 
   return {
     faces: faces.filter(f => f.face).map(({ frameNumber, face }) => ({ frameNumber, ...face })),
-    overlaps, thresholdCrossings, sizeJumps, movements,
+    overlaps,
+    thresholdCrossings,
+    sizeJumps,
+    movements,
+    frameRange: [scanStartFrame, scanEndFrame],
+    scannedFrames: faces.length,
+    runMode: options.mode ?? 'full',
   }
 }
