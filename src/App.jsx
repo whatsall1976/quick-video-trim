@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useState } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { useVideoPlayback } from './hooks/useVideoPlayback'
 import { useMarkers } from './hooks/useMarkers'
@@ -8,11 +8,12 @@ import ControlBar from './components/ControlBar'
 import MarkerPanel from './components/MarkerPanel'
 import DetectorPanel from './components/DetectorPanel'
 import SettingsPanel from './components/SettingsPanel'
-import { exportVideo, downloadBlob } from './utils/videoExport'
+import { exportVideo, downloadBlob, createProjectJsonBlob } from './utils/videoExport'
 
 function AppInner() {
   const { state, dispatch, toast } = useApp()
   const { activePanel, video, trimSegments, settings, isExporting, exportProgress, exportMessage, toasts } = state
+  const [showExportModal, setShowExportModal] = useState(false)
 
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -29,8 +30,28 @@ function AppInner() {
     dispatch({ type: 'CLOSE_PANEL' })
   }, [dispatch])
 
-  const handleExport = useCallback(async () => {
+  const openExportModal = useCallback(() => {
     if (!video.file) { toast('No video loaded', 'warning'); return }
+    setShowExportModal(true)
+  }, [video.file, toast])
+
+  const closeExportModal = useCallback(() => {
+    if (!isExporting) setShowExportModal(false)
+  }, [isExporting])
+
+  const handleExport = useCallback(async ({ includeVideo, includeJson }) => {
+    if (!video.file) { toast('No video loaded', 'warning'); return }
+    if (!includeVideo && !includeJson) return
+
+    const baseName = video.file.name.replace(/\.[^.]+$/, '')
+    setShowExportModal(false)
+
+    if (!includeVideo) {
+      const jsonBlob = createProjectJsonBlob(video.file, trimSegments, video, settings.audioMode)
+      downloadBlob(jsonBlob, `${baseName}_project.json`)
+      toast('Project JSON downloaded.', 'success', 4000)
+      return
+    }
 
     dispatch({ type: 'SET_EXPORTING', payload: true })
     dispatch({ type: 'SET_EXPORT_PROGRESS', payload: { progress: 0, message: 'Starting…' } })
@@ -44,10 +65,9 @@ function AppInner() {
         ({ progress, message }) => dispatch({ type: 'SET_EXPORT_PROGRESS', payload: { progress: Math.round(progress * 100), message } })
       )
 
-      const baseName = video.file.name.replace(/\.[^.]+$/, '')
       downloadBlob(videoBlob, `${baseName}_trimmed.mp4`)
-      downloadBlob(jsonBlob, `${baseName}_project.json`)
-      toast('Export complete! Files downloaded.', 'success', 5000)
+      if (includeJson) downloadBlob(jsonBlob, `${baseName}_project.json`)
+      toast(includeJson ? 'Export complete! Files downloaded.' : 'Video export complete.', 'success', 5000)
     } catch (err) {
       console.error(err)
       toast(`Export failed: ${err.message}`, 'error', 8000)
@@ -91,9 +111,9 @@ function AppInner() {
               fontSize: 11, height: 48, width: 40,
               lineHeight: 1.2,
             }}
-            onClick={handleExport}
+            onClick={openExportModal}
             disabled={!video.file || isExporting}
-            title="Export trimmed video"
+            title="Export"
             id="export-btn"
           >
             {isExporting ? '…' : '⬇︎'}
@@ -119,6 +139,46 @@ function AppInner() {
 
       {/* Timeline */}
       <Timeline />
+
+      {/* Export choice modal */}
+      {showExportModal && (
+        <div className="export-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeExportModal() }}>
+          <div className="export-choice-card" role="dialog" aria-modal="true" aria-labelledby="export-choice-title">
+            <div className="export-choice-header">
+              <div>
+                <div className="export-choice-title" id="export-choice-title">Export</div>
+                <div className="export-choice-subtitle">Choose what to download.</div>
+              </div>
+              <button className="icon-btn" type="button" onClick={closeExportModal} aria-label="Close export options">
+                ×
+              </button>
+            </div>
+            <div className="export-choice-actions">
+              <button type="button" className="export-choice-btn" onClick={() => handleExport({ includeVideo: false, includeJson: true })}>
+                <span className="export-choice-icon">JSON</span>
+                <span>
+                  <strong>Project JSON</strong>
+                  <small>Download trim metadata only.</small>
+                </span>
+              </button>
+              <button type="button" className="export-choice-btn" onClick={() => handleExport({ includeVideo: true, includeJson: false })}>
+                <span className="export-choice-icon">MP4</span>
+                <span>
+                  <strong>Video</strong>
+                  <small>Render and download the trimmed video.</small>
+                </span>
+              </button>
+              <button type="button" className="export-choice-btn primary" onClick={() => handleExport({ includeVideo: true, includeJson: true })}>
+                <span className="export-choice-icon">ALL</span>
+                <span>
+                  <strong>Video + JSON</strong>
+                  <small>Render video and save project metadata.</small>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Export overlay */}
       {isExporting && (

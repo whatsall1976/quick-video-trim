@@ -30,18 +30,7 @@ export async function exportVideo(videoFile, trimSegments, videoMeta, audioMode,
   onProgress?.({ progress: 0.05, message: 'Loading video…' })
   await ff.writeFile('input.mp4', await fetchFile(videoFile))
 
-  // Calculate keep segments (inverse of trim)
-  const kept = []
-  let cursor = 0
-  const sorted = [...trimSegments].sort((a, b) => a.startFrame - b.startFrame)
-  for (const seg of sorted) {
-    const start = Math.max(0, seg.startFrame)
-    const end = Math.min(totalFrames - 1, seg.endFrame)
-    if (cursor < start) kept.push({ startFrame: cursor, endFrame: start - 1 })
-    cursor = end + 1
-  }
-  if (cursor < totalFrames) kept.push({ startFrame: cursor, endFrame: totalFrames - 1 })
-  if (!kept.length) kept.push({ startFrame: 0, endFrame: totalFrames - 1 })
+  const kept = getKeptSegments(trimSegments, videoMeta)
 
   onProgress?.({ progress: 0.1, message: 'Trimming segments…' })
 
@@ -95,19 +84,39 @@ export async function exportVideo(videoFile, trimSegments, videoMeta, audioMode,
   const data = await ff.readFile('output.mp4')
   const blob = new Blob([data.buffer], { type: 'video/mp4' })
 
-  // Build JSON metadata
+  const jsonBlob = createProjectJsonBlob(videoFile, trimSegments, videoMeta, audioMode)
+
+  onProgress?.({ progress: 1, message: 'Done!' })
+  return { videoBlob: blob, jsonBlob }
+}
+
+export function getKeptSegments(trimSegments, videoMeta) {
+  const { totalFrames } = videoMeta
+  const kept = []
+  let cursor = 0
+  const sorted = [...trimSegments].sort((a, b) => a.startFrame - b.startFrame)
+  for (const seg of sorted) {
+    const start = Math.max(0, seg.startFrame)
+    const end = Math.min(totalFrames - 1, seg.endFrame)
+    if (cursor < start) kept.push({ startFrame: cursor, endFrame: start - 1 })
+    cursor = end + 1
+  }
+  if (cursor < totalFrames) kept.push({ startFrame: cursor, endFrame: totalFrames - 1 })
+  if (!kept.length) kept.push({ startFrame: 0, endFrame: totalFrames - 1 })
+  return kept
+}
+
+export function createProjectJsonBlob(videoFile, trimSegments, videoMeta, audioMode) {
+  const { fps, duration } = videoMeta
   const jsonMeta = {
     videoFile: videoFile.name,
     duration,
     fps,
     exportedAt: new Date().toISOString(),
-    keptSegments: kept,
+    keptSegments: getKeptSegments(trimSegments, videoMeta),
     audioMode,
   }
-  const jsonBlob = new Blob([JSON.stringify(jsonMeta, null, 2)], { type: 'application/json' })
-
-  onProgress?.({ progress: 1, message: 'Done!' })
-  return { videoBlob: blob, jsonBlob }
+  return new Blob([JSON.stringify(jsonMeta, null, 2)], { type: 'application/json' })
 }
 
 export function downloadBlob(blob, filename) {
