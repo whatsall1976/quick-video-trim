@@ -1,5 +1,6 @@
 import io
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -7,13 +8,13 @@ from typing import Any
 import cv2
 import numpy as np
 import onnxruntime as ort
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
 
 try:
-  from scenedetect import detect, AdaptiveDetector, FrameTimecode
+  from scenedetect import detect, AdaptiveDetector, ContentDetector
 
   TRANSITION_DETECTOR_AVAILABLE = True
 except ImportError:
@@ -417,6 +418,86 @@ async def detect_transitions(request: DetectTransitionsRequest) -> dict[str, Any
             "reason": "Transition / crossfade",
           }
         )
+
+    return {"status": "ok", "rejectedRanges": rejected_ranges}
+
+  except Exception as e:
+    return {"status": "error", "message": str(e), "rejectedRanges": []}
+
+
+@app.post("/detect-transitions-frames")
+async def detect_transitions_frames(
+  frames: list[UploadFile] = File(...),
+  threshold: int = Form(50),
+  startFrame: int = Form(0),
+  fps: int = Form(30),
+) -> dict[str, Any]:
+  """Accept uploaded frames, reconstruct as video, run scenedetect"""
+  if not TRANSITION_DETECTOR_AVAILABLE:
+    return {"status": "missing", "message": "scenedetect not available", "rejectedRanges": []}
+
+  try:
+    if not frames:
+      return {"status": "ok", "rejectedRanges": []}
+
+    # Decode first frame to get dimensions
+    first_raw = await frames[0].read()
+    first_img = cv2.imdecode(np.frombuffer(first_raw, np.uint8), cv2.IMREAD_COLOR)
+    if first_img is None:
+      return {"status": "error", "message": "Failed to decode frame", "rejectedRanges": []}
+
+    h, w = first_img.shape[:2]
+
+    # Write frames to temporary video file for scenedetect
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    tmp_path = tmp.name
+    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    writer.write(first_img)
+
+    for frame_file in frames[1:]:
+      raw = await frame_file.read()
+      img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+      if img is not None:
+        writer.write(img)
+
+    writer.release()
+    tmp.close()
+
+    # Run scenedetect with both ContentDetector (hard cuts) and AdaptiveDetector (dissolves)
+    content_threshold = ((100.0 - threshold) / 100.0) * 27.0
+    adaptive_threshold = max(1.0, ((100.0 - threshold) / 100.0) * 3.0)
+
+    scenes_content = detect(tmp_path, ContentDetector(threshold=content_threshold))
+    scenes_adaptive = detect(tmp_path, AdaptiveDetector(adaptive_threshold=adaptive_threshold))
+
+    # Merge scenes from both detectors
+    all_scenes = list(scenes_content) + list(scenes_adaptive)
+
+    rejected_ranges = []
+    seen = set()
+
+    for scene_start, scene_end in all_scenes:
+      sf = startFrame + int(scene_start.get_frames())
+      ef = startFrame + int(scene_end.get_frames())
+
+      # 5-frame buffer around transition point
+      ts = max(startFrame, sf - 2)
+      te = sf + 2
+
+      key = (ts, te)
+      if key in seen:
+        continue
+      seen.add(key)
+
+      rejected_ranges.append({
+        "startFrame": ts,
+        "endFrame": te,
+        "score": 0.85,
+        "reason": "Transition / crossfade",
+      })
+
+    # Cleanup temp file
+    os.unlink(tmp_path)
 
     return {"status": "ok", "rejectedRanges": rejected_ranges}
 
