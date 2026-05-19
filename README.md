@@ -41,12 +41,28 @@ Both detectors share a single **MediaPipe FaceLandmarker** instance (`numFaces: 
 - **Occlusion** samples every 5 frames. Checks landmark visibility for left eye, right eye, nose, lips.
 - Results are merged via `mergeRejectedRanges()` with a 5-frame tolerance, then converted to flagged markers.
 
+### Multi-face analysis (smart two-face handling)
+
+When multiple faces are detected, naive rejection ("2 faces = bad") produces false positives from random background strangers. Instead, we compute **bounding boxes** from MediaPipe's 478 landmarks per face and apply size/overlap analysis:
+
+| Scenario | Size Ratio | Overlap | Result |
+|----------|-----------|---------|--------|
+| 0 faces (ghosted/blurry dissolve) | — | — | **Flag**: "No face detected" |
+| Big face + small background face | < `twoFaceSizeRatio` (default 30%) | — | **OK**: small face ignored, angle check on primary |
+| Similar-sized overlapping faces (dissolve) | ≥ threshold | > `faceOverlapRatio` (default 20%) | **Flag**: "Overlapping faces" |
+| Similar-sized non-overlapping faces | ≥ threshold | ≤ threshold | **Flag**: "Multiple similar-sized faces" (user can unflag) |
+
+- **Size ratio** = smaller face area / larger face area. A ratio below the threshold means the second face is a distant bystander — ignored.
+- **Overlap** = intersection area / smaller face area. High overlap between similar-sized faces indicates dissolve/double-exposure.
+- The **primary face** (largest bounding box) is always used for yaw/pitch/roll angle checks, even when secondary faces are ignored.
+- Both thresholds (`twoFaceSizeRatio`, `faceOverlapRatio`) are configurable in Settings. The snapshot tool displays per-face bounding box, size ratio, and overlap for calibration.
+
 ### How dissolves/crossfades get caught
 
-We intentionally removed dedicated dissolve detection (TransNetV2, linear blend reconstruction) after extensive testing. Face Landmarker catches dissolves via face count:
+We intentionally removed dedicated dissolve detection (TransNetV2, linear blend reconstruction) after extensive testing. Face Landmarker catches dissolves via the multi-face analysis above:
 
 - **Ghosted/blurry dissolve**: MediaPipe sees 0 faces → flagged as "No face detected"
-- **Clear two-face dissolve**: MediaPipe sees >1 faces → flagged as "Multiple faces detected"
+- **Clear two-face dissolve**: MediaPipe sees 2 similar-sized overlapping faces → flagged as "Overlapping faces"
 - **Edge case**: One clear face + faint ghost that doesn't register → `faceCount=1`, may pass undetected. Angle/occlusion checks provide partial coverage.
 
 See [Detection Roadmap](#detection-roadmap) below for the full history.
