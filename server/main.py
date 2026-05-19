@@ -4,11 +4,21 @@ import time
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from PIL import Image
+
+try:
+  import torch
+  from transnetv2 import TransNetV2
+
+  TRANSNETV2_AVAILABLE = True
+except ImportError:
+  TRANSNETV2_AVAILABLE = False
 
 APP_HOST = os.getenv("YOLO_SERVER_HOST", "127.0.0.1")
 APP_PORT = int(os.getenv("YOLO_SERVER_PORT", "8765"))
@@ -101,6 +111,12 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float, limit: int) ->
     order = rest[iou <= iou_thresh]
 
   return keep
+
+
+class DetectTransitionsRequest(BaseModel):
+  frameRange: list[int]
+  videoFile: str
+  threshold: int
 
 
 def parse_yolo_output(
@@ -211,6 +227,125 @@ async def detect(
   dt_ms = int((time.time() - t0) * 1000)
 
   return {"boxes": boxes, "ms": dt_ms, "model": MODEL_NAME, "nmsIou": nms_iou}
+
+
+@app.post("/detect-transitions")
+async def detect_transitions(request: DetectTransitionsRequest) -> dict[str, Any]:
+  if not TRANSNETV2_AVAILABLE:
+    return {"status": "missing", "message": "TransNetV2 not available", "rejectedRanges": []}
+
+  try:
+    start_frame, end_frame = request.frameRange
+    video_file = request.videoFile
+    threshold = request.threshold
+
+    # Validate inputs
+    if not Path(video_file).exists():
+      return {
+        "status": "error",
+        "message": f"Video file not found: {video_file}",
+        "rejectedRanges": [],
+      }
+
+    if start_frame < 0 or end_frame < start_frame:
+      return {
+        "status": "error",
+        "message": "Invalid frame range: start must be >= 0 and end must be >= start",
+        "rejectedRanges": [],
+      }
+
+    if threshold < 0 or threshold > 100:
+      return {
+        "status": "error",
+        "message": "Threshold must be between 0 and 100",
+        "rejectedRanges": [],
+      }
+
+    # Open video and extract frames in the range
+    cap = cv2.VideoCapture(video_file)
+    if not cap.isOpened():
+      return {
+        "status": "error",
+        "message": "Failed to open video file",
+        "rejectedRanges": [],
+      }
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if end_frame >= total_frames:
+      end_frame = total_frames - 1
+
+    frames = []
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    for frame_idx in range(start_frame, end_frame + 1):
+      ret, frame = cap.read()
+      if not ret:
+        break
+      # Convert BGR to RGB for TransNetV2
+      frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+      frames.append(frame_rgb)
+
+    cap.release()
+
+    if not frames:
+      return {"status": "ok", "rejectedRanges": []}
+
+    # Run TransNetV2 detection
+    model = TransNetV2()
+    frames_array = np.array(frames, dtype=np.uint8)
+
+    # TransNetV2 expects frames in [0, 255] range
+    predictions = model.predict_on_video(frames_array)
+
+    # Process predictions to find transitions
+    threshold_normalized = threshold / 100.0
+    rejected_ranges = []
+
+    # predictions is a 1D array of transition scores for each frame
+    for i, score in enumerate(predictions[:-1]):
+      if score >= threshold_normalized:
+        # Found a transition, collect adjacent frames with high scores
+        transition_start = i
+        transition_end = i + 1
+
+        # Expand backwards
+        for j in range(i - 1, -1, -1):
+          if predictions[j] >= threshold_normalized * 0.5:
+            transition_start = j
+          else:
+            break
+
+        # Expand forwards
+        for j in range(i + 2, len(predictions)):
+          if predictions[j] >= threshold_normalized * 0.5:
+            transition_end = j + 1
+          else:
+            break
+
+        # Convert from relative to absolute frame indices
+        abs_start = start_frame + transition_start
+        abs_end = start_frame + transition_end
+
+        # Check if this overlaps with any existing range
+        overlaps = False
+        for existing in rejected_ranges:
+          if not (abs_end < existing["startFrame"] or abs_start > existing["endFrame"]):
+            overlaps = True
+            break
+
+        if not overlaps:
+          rejected_ranges.append(
+            {
+              "startFrame": abs_start,
+              "endFrame": abs_end,
+              "score": float(score),
+              "reason": "Transition / crossfade",
+            }
+          )
+
+    return {"status": "ok", "rejectedRanges": rejected_ranges}
+
+  except Exception as e:
+    return {"status": "error", "message": str(e), "rejectedRanges": []}
 
 
 if __name__ == "__main__":

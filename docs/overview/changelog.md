@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+#### Task #5: Add POST /detect-transitions Endpoint
+- **Endpoint:** `POST /detect-transitions`
+- **Purpose:** Detect video transitions and crossfades using TransNetV2
+- **File:** `server/main.py:232-348`
+- **Request Body:** `frameRange`, `videoFile`, `threshold`
+- **Response:** Returns `status` (ok/missing/error) with `rejectedRanges` containing detected transitions
+- **Features:**
+  - Graceful handling when TransNetV2 not installed (returns `status: "missing"`)
+  - Frame extraction and RGB conversion from video file
+  - Transition detection with score-based filtering
+  - Range expansion to collect adjacent frames in transitions
+  - Overlap detection to avoid duplicate ranges
+  - Comprehensive error handling with descriptive messages
+- **Dependencies:** cv2 (OpenCV), torch, transnetv2
+
 ### Fixed
 
 #### Issue #1: Cmd+Shift+M Keyboard Shortcut Not Working
