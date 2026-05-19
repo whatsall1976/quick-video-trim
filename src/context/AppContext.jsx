@@ -36,19 +36,19 @@ function calcTrimSegments(markers, settings) {
     .map(m => {
       const w = m.customTrmWin ?? trmWin
       const h = Math.floor(w / 2)
-      return { start: m.frameNumber - h, end: m.frameNumber + h, markerId: m.id, reason: 'marker' }
+      return { startFrame: m.frameNumber - h, endFrame: m.frameNumber + h, markerId: m.id, reason: 'marker' }
     })
-    .sort((a, b) => a.start - b.start)
+    .sort((a, b) => a.startFrame - b.startFrame)
 
   // Merge based on trmIntv gaps
   const merged = []
   for (const win of windows) {
     if (!merged.length) { merged.push({ ...win }); continue }
     const prev = merged[merged.length - 1]
-    const gap = win.start - prev.end
+    const gap = win.startFrame - prev.endFrame
     const intv = prev.customTrmIntv ?? trmIntv
     if (gap < intv) {
-      prev.end = Math.max(prev.end, win.end)
+      prev.endFrame = Math.max(prev.endFrame, win.endFrame)
     } else {
       merged.push({ ...win })
     }

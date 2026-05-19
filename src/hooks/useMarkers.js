@@ -47,7 +47,7 @@ export function useMarkers() {
   useEffect(() => {
     const onKey = (e) => {
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'M') {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyM') {
         e.preventDefault()
         if (!video.file) { toast('No video loaded', 'warning'); return }
         const m = addMarker(playback.currentFrame, { autoDetected: false })

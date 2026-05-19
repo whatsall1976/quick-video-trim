@@ -6,7 +6,7 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
   const { video, playback } = state
   const fileInputRef = useRef(null)
 
-  // Draw current frame onto canvas whenever frame changes (paused) or continuously (playing)
+  // Draw current frame onto canvas continuously via RAF (for responsive scrubbing)
   useEffect(() => {
     const vid = videoRef?.current
     const canvas = canvasRef?.current
@@ -19,21 +19,27 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
       ctx.drawImage(vid, 0, 0, canvas.width, canvas.height)
     }
 
-    if (playback.isPlaying) {
-      // During playback, draw every RAF tick
-      let rafId
-      const loop = () => { draw(); rafId = requestAnimationFrame(loop) }
-      rafId = requestAnimationFrame(loop)
-      return () => cancelAnimationFrame(rafId)
-    } else {
-      // Paused: seek then draw once onseeked fires
+    // Always draw via RAF for responsiveness
+    let rafId
+    let timeoutId
+    const loop = () => {
       const targetTime = playback.currentFrame / (video.fps || 30)
-      if (Math.abs(vid.currentTime - targetTime) > 0.001) {
-        vid.onseeked = () => { draw(); vid.onseeked = null }
+      // Keep seeking video element in sync with current frame
+      if (!playback.isPlaying && Math.abs(vid.currentTime - targetTime) > 0.001) {
         vid.currentTime = targetTime
-      } else {
-        draw()
       }
+      draw()
+      rafId = requestAnimationFrame(loop)
+    }
+
+    rafId = requestAnimationFrame(loop)
+
+    // Fallback: force redraw if RAF stalls (for very large files)
+    timeoutId = setInterval(draw, 100)
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      clearInterval(timeoutId)
     }
   }, [playback.currentFrame, playback.isPlaying, video, videoRef, canvasRef])
 
