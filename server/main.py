@@ -5,6 +5,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import torch
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -77,8 +78,10 @@ async def detect_transitions_frames(
     # Run TransNetV2
     t0 = time.time()
     model = get_transnet()
-    frames_np = np.array(decoded, dtype=np.uint8)
-    predictions = model.predict_frames(frames_np)
+    frames_tensor = torch.from_numpy(np.array(decoded, dtype=np.uint8))
+    single_preds, all_preds = model.predict_frames(frames_tensor)
+    # single_preds: (N,) tensor with per-frame transition probability
+    predictions = single_preds.detach().cpu().numpy()
     dt_ms = int((time.time() - t0) * 1000)
 
     # predictions shape: (N,) with transition probability per frame
