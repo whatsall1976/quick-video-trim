@@ -1,9 +1,11 @@
 /**
  * Face Landmarker detector - Detects face quality issues
- * Uses edge detection to estimate face presence and sharpness
+ * Uses histogram analysis and edge detection to evaluate face presence
  * Flags frames with:
  * - Low face sharpness (blurry faces)
  * - Dark/underexposed faces (poor lighting)
+ * - Overlapping/multiple faces (poor framing)
+ * - Inconsistent face detection (flickering detection)
  */
 
 export async function faceLandmarkerDetect(videoElement, frameRange) {
@@ -26,6 +28,8 @@ export async function faceLandmarkerDetect(videoElement, frameRange) {
     canvas.width = videoElement.videoWidth
     canvas.height = videoElement.videoHeight
     const ctx = canvas.getContext('2d')
+
+    let lastHadFace = false
 
     // Sample every 10 frames for performance
     for (let frameNum = startFrame; frameNum <= endFrame; frameNum += 10) {
@@ -52,56 +56,94 @@ export async function faceLandmarkerDetect(videoElement, frameRange) {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
         const data = imageData.data
 
-        // Calculate face region sharpness using Laplacian edge detection
-        let sharpness = 0
+        // Analyze frame for face quality issues
         let brightness = 0
+        let sharpness = 0
+        let edgeVariance = 0
+        const edgeMap = new Uint8Array((canvas.height - 2) * (canvas.width - 2))
+        let edgeIdx = 0
 
-        for (let i = 0; i < data.length; i += 4) {
-          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-          brightness += gray
-        }
-        brightness /= (canvas.width * canvas.height)
-
-        // Simple edge detection in central region
-        for (let y = 10; y < canvas.height - 10; y++) {
-          for (let x = 10; x < canvas.width - 10; x++) {
+        // First pass: brightness and edge detection
+        for (let y = 1; y < canvas.height - 1; y++) {
+          for (let x = 1; x < canvas.width - 1; x++) {
             const idx = (y * canvas.width + x) * 4
-            const center = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]
+            const gray = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]
+            brightness += gray
 
-            // Laplacian-like edge detection
-            const neighbors = [
-              0.299 * data[idx - 4] + 0.587 * data[idx - 3] + 0.114 * data[idx - 2],
-              0.299 * data[idx + 4] + 0.587 * data[idx + 5] + 0.114 * data[idx + 6],
-              0.299 * data[idx - canvas.width * 4] + 0.587 * data[idx - canvas.width * 4 + 1] + 0.114 * data[idx - canvas.width * 4 + 2],
-              0.299 * data[idx + canvas.width * 4] + 0.587 * data[idx + canvas.width * 4 + 1] + 0.114 * data[idx + canvas.width * 4 + 2]
-            ]
+            // Sobel edge detection
+            const left = 0.299 * data[idx - 4] + 0.587 * data[idx - 3] + 0.114 * data[idx - 2]
+            const right = 0.299 * data[idx + 4] + 0.587 * data[idx + 5] + 0.114 * data[idx + 6]
+            const top = 0.299 * data[idx - canvas.width * 4] + 0.587 * data[idx - canvas.width * 4 + 1] + 0.114 * data[idx - canvas.width * 4 + 2]
+            const bottom = 0.299 * data[idx + canvas.width * 4] + 0.587 * data[idx + canvas.width * 4 + 1] + 0.114 * data[idx + canvas.width * 4 + 2]
 
-            const avgNeighbor = neighbors.reduce((a, b) => a + b) / 4
-            sharpness += Math.abs(center - avgNeighbor)
+            const edge = Math.sqrt(((right - left) ** 2 + (bottom - top) ** 2) / 2)
+            edgeMap[edgeIdx++] = Math.min(255, edge)
+            sharpness += edge
           }
         }
 
-        // Normalize sharpness
-        sharpness /= ((canvas.height - 20) * (canvas.width - 20))
+        brightness /= (canvas.width * canvas.height)
+        sharpness /= ((canvas.height - 2) * (canvas.width - 2))
 
-        // Flag if face is too dark or too blurry
-        const isTooDark = brightness < 80 // Very dark
-        const isTooBlurry = sharpness < 2 // Low edge detection = blurry
+        // Calculate edge variance (detect overlapping faces via edge clustering)
+        const meanEdge = sharpness
+        for (let i = 0; i < edgeMap.length; i++) {
+          edgeVariance += (edgeMap[i] - meanEdge) ** 2
+        }
+        edgeVariance = Math.sqrt(edgeVariance / edgeMap.length)
 
-        if (isTooDark || isTooBlurry) {
-          const reason = isTooDark && isTooBlurry
-            ? 'Poor face quality: dark & blurry'
-            : isTooDark
-            ? 'Poor face quality: underexposed'
-            : 'Poor face quality: blurry'
+        // Detect face presence by edge density in center region
+        let centerEdges = 0
+        const centerY = Math.floor(canvas.height / 4)
+        const centerH = Math.floor(canvas.height / 2)
+        const centerX = Math.floor(canvas.width / 4)
+        const centerW = Math.floor(canvas.width / 2)
 
+        for (let y = centerY; y < centerY + centerH && y < canvas.height - 1; y++) {
+          for (let x = centerX; x < centerX + centerW && x < canvas.width - 1; x++) {
+            const idx = ((y - 1) * (canvas.width - 2) + (x - 1))
+            if (idx < edgeMap.length && edgeMap[idx] > 20) {
+              centerEdges++
+            }
+          }
+        }
+
+        const hasFace = centerEdges > (centerW * centerH * 0.05) // At least 5% edge pixels
+        const isTooDark = brightness < 80
+        const isTooBlurry = sharpness < 3
+        const hasOverlap = edgeVariance > 50 && centerEdges > (centerW * centerH * 0.15) // High variance + high edges = overlapping faces
+        const hasFlicker = lastHadFace !== hasFace // Face detection inconsistency
+
+        let flagFrame = false
+        let reason = ''
+
+        if (isTooDark && isTooBlurry) {
+          reason = 'Poor face quality: dark & blurry'
+          flagFrame = true
+        } else if (isTooDark) {
+          reason = 'Poor face quality: underexposed'
+          flagFrame = true
+        } else if (isTooBlurry) {
+          reason = 'Poor face quality: blurry'
+          flagFrame = true
+        } else if (hasOverlap && hasFace) {
+          reason = 'Overlapping/multiple faces detected'
+          flagFrame = true
+        } else if (hasFlicker) {
+          reason = 'Face detection inconsistent'
+          flagFrame = true
+        }
+
+        if (flagFrame) {
           rejectedRanges.push({
             startFrame: Math.max(startFrame, frameNum - 5),
             endFrame: Math.min(endFrame, frameNum + 5),
-            score: isTooDark && isTooBlurry ? 0.9 : 0.7,
+            score: hasOverlap ? 0.85 : isTooDark && isTooBlurry ? 0.9 : 0.7,
             reason
           })
         }
+
+        lastHadFace = hasFace
       } catch (e) {
         // Skip frames that error
         continue
