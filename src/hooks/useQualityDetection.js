@@ -54,6 +54,8 @@ export function useQualityDetection(videoRef) {
             maxFaceYaw: state.settings.maxFaceYaw,
             maxFacePitch: state.settings.maxFacePitch,
             maxFaceRoll: state.settings.maxFaceRoll,
+            twoFaceSizeRatio: (state.settings.twoFaceSizeRatio ?? 30) / 100,
+            faceOverlapRatio: (state.settings.faceOverlapRatio ?? 20) / 100,
           })
           modelRuns.push({ key: 'faceLandmarker', label: 'Face Landmarker', enabled: true, ...result })
         } else {

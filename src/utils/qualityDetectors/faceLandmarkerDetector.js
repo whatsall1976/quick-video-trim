@@ -1,6 +1,6 @@
 /**
  * Face Landmarker detector - Uses MediaPipe FaceLandmarker
- * Detects: yaw/pitch/roll violations, 0 faces, >1 faces
+ * Detects: yaw/pitch/roll violations, 0 faces, overlapping/similar-sized multi-faces
  */
 import { getSharedLandmarker } from './sharedLandmarker'
 
@@ -11,6 +11,77 @@ function matrixToAngles(matrix) {
   const yaw = Math.atan2(m[2], m[10]) * (180 / Math.PI)
   const roll = Math.atan2(m[4], m[5]) * (180 / Math.PI)
   return { yaw, pitch, roll }
+}
+
+/** Compute bounding box from MediaPipe normalized landmarks (0-1) */
+function landmarksBBox(landmarks) {
+  let minX = 1, minY = 1, maxX = 0, maxY = 0
+  for (const lm of landmarks) {
+    if (lm.x < minX) minX = lm.x
+    if (lm.x > maxX) maxX = lm.x
+    if (lm.y < minY) minY = lm.y
+    if (lm.y > maxY) maxY = lm.y
+  }
+  const w = maxX - minX
+  const h = maxY - minY
+  return { x: minX, y: minY, w, h, area: w * h }
+}
+
+/** Compute intersection-over-smaller-area between two bounding boxes */
+function bboxOverlapRatio(a, b) {
+  const x1 = Math.max(a.x, b.x)
+  const y1 = Math.max(a.y, b.y)
+  const x2 = Math.min(a.x + a.w, b.x + b.w)
+  const y2 = Math.min(a.y + a.h, b.y + b.h)
+  if (x2 <= x1 || y2 <= y1) return 0
+  const intersection = (x2 - x1) * (y2 - y1)
+  const smallerArea = Math.min(a.area, b.area)
+  return smallerArea > 0 ? intersection / smallerArea : 0
+}
+
+/**
+ * Analyze multi-face results. Returns { primaryIdx, reason } or null if OK.
+ * - Two faces with similar size AND overlapping bboxes → dissolve
+ * - Two faces with similar size, no overlap → multiple people in frame
+ * - Big face + small background face → ignore small face, return primaryIdx
+ */
+function analyzeMultiFace(faceLandmarks, settings) {
+  const boxes = faceLandmarks.map(lm => landmarksBBox(lm))
+  const sizeRatioThreshold = settings.twoFaceSizeRatio ?? 0.3
+  const overlapThreshold = settings.faceOverlapRatio ?? 0.2
+
+  // Sort by area descending - index 0 is the biggest face
+  const sorted = boxes.map((b, i) => ({ ...b, idx: i })).sort((a, b) => b.area - a.area)
+  const biggest = sorted[0]
+
+  // Check each secondary face against the biggest
+  for (let i = 1; i < sorted.length; i++) {
+    const other = sorted[i]
+    const sizeRatio = other.area / biggest.area
+
+    if (sizeRatio < sizeRatioThreshold) {
+      // Small background face - ignore it
+      continue
+    }
+
+    // Similar-sized face - check overlap
+    const overlap = bboxOverlapRatio(biggest, other)
+    if (overlap > overlapThreshold) {
+      return {
+        primaryIdx: biggest.idx,
+        reason: `Overlapping faces (sizeRatio=${Math.round(sizeRatio * 100)}%, overlap=${Math.round(overlap * 100)}%)`
+      }
+    }
+
+    // Similar-sized, non-overlapping
+    return {
+      primaryIdx: biggest.idx,
+      reason: `Multiple similar-sized faces (sizeRatio=${Math.round(sizeRatio * 100)}%)`
+    }
+  }
+
+  // All secondary faces are small background faces - treat as single subject
+  return { primaryIdx: biggest.idx, reason: null }
 }
 
 /**
@@ -37,6 +108,16 @@ export async function snapshotFaceParams(videoElement, frameNumber) {
 
   for (let i = 0; i < faceCount; i++) {
     const face = { index: i }
+
+    // Bounding box from landmarks
+    const bbox = landmarksBBox(result.faceLandmarks[i])
+    face.bbox = {
+      x: Math.round(bbox.x * 1000) / 1000,
+      y: Math.round(bbox.y * 1000) / 1000,
+      w: Math.round(bbox.w * 1000) / 1000,
+      h: Math.round(bbox.h * 1000) / 1000,
+      area: Math.round(bbox.area * 10000) / 10000,
+    }
 
     // Pose angles
     if (result.facialTransformationMatrixes?.[i]) {
@@ -71,11 +152,24 @@ export async function snapshotFaceParams(videoElement, frameNumber) {
     snapshot.faces.push(face)
   }
 
+  // Multi-face analysis
+  if (faceCount > 1) {
+    const boxes = result.faceLandmarks.map(lm => landmarksBBox(lm))
+    const sorted = boxes.map((b, i) => ({ ...b, idx: i })).sort((a, b) => b.area - a.area)
+    for (let i = 1; i < sorted.length; i++) {
+      const sizeRatio = Math.round((sorted[i].area / sorted[0].area) * 100)
+      const overlap = Math.round(bboxOverlapRatio(sorted[0], sorted[i]) * 100)
+      snapshot.faces[sorted[i].idx].sizeRatioToPrimary = sizeRatio + '%'
+      snapshot.faces[sorted[i].idx].overlapWithPrimary = overlap + '%'
+    }
+    snapshot.faces[sorted[0].idx].isPrimary = true
+  }
+
   return snapshot
 }
 
 export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
-  // settings = {maxFaceYaw, maxFacePitch, maxFaceRoll}
+  // settings = {maxFaceYaw, maxFacePitch, maxFaceRoll, twoFaceSizeRatio, faceOverlapRatio}
 
   try {
     if (!videoElement || !videoElement.videoWidth) {
@@ -115,19 +209,29 @@ export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
         continue
       }
 
+      // Determine which face index to check angles on
+      let primaryIdx = 0
+
       if (faceCount > 1) {
-        rejectedRanges.push({
-          startFrame: frameNum,
-          endFrame: Math.min(endFrame, frameNum + 3),
-          score: 0.85,
-          reason: `Multiple faces detected (${faceCount})`
-        })
-        continue
+        const analysis = analyzeMultiFace(result.faceLandmarks, settings)
+        primaryIdx = analysis.primaryIdx
+
+        if (analysis.reason) {
+          // Similar-sized or overlapping faces → flag
+          rejectedRanges.push({
+            startFrame: frameNum,
+            endFrame: Math.min(endFrame, frameNum + 3),
+            score: 0.85,
+            reason: analysis.reason
+          })
+          continue
+        }
+        // Small background face(s) ignored — fall through to angle check on primary
       }
 
-      // Single face - check pose angles from transformation matrix
-      if (result.facialTransformationMatrixes?.length > 0) {
-        const angles = matrixToAngles(result.facialTransformationMatrixes[0])
+      // Check pose angles on primary face
+      if (result.facialTransformationMatrixes?.[primaryIdx]) {
+        const angles = matrixToAngles(result.facialTransformationMatrixes[primaryIdx])
 
         const yawExceeded = Math.abs(angles.yaw) > maxYaw
         const pitchExceeded = Math.abs(angles.pitch) > maxPitch

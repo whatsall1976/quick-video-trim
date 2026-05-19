@@ -9,6 +9,8 @@ const QUALITY_GATES_FIELDS = [
   { key: 'maxFaceYaw',         label: 'Max Face Yaw (degrees)', type: 'number', min: 0 },
   { key: 'maxFacePitch',       label: 'Max Face Pitch (degrees)', type: 'number', min: 0 },
   { key: 'maxFaceRoll',        label: 'Max Face Roll (degrees)', type: 'number', min: 0 },
+  { key: 'twoFaceSizeRatio',   label: 'Two-Face Size Ratio %', type: 'number', min: 0, max: 100 },
+  { key: 'faceOverlapRatio',   label: 'Face Overlap Ratio %', type: 'number', min: 0, max: 100 },
   { key: 'occlusionThreshold', label: 'Occlusion Threshold %', type: 'number', min: 0, max: 100 },
 ]
 
@@ -25,6 +27,8 @@ const DEFAULT_SETTINGS = {
   maxFaceYaw: 30,
   maxFacePitch: 20,
   maxFaceRoll: 20,
+  twoFaceSizeRatio: 30,
+  faceOverlapRatio: 20,
   occlusionThreshold: 50,
   audioMode: 'SYNC',
 }

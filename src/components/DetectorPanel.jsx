@@ -200,7 +200,15 @@ export default function DetectorPanel({ videoRef, onClose }) {
                 <div>Faces: {snapshotResult.detectors.faceLandmarker.faceCount}</div>
                 {snapshotResult.detectors.faceLandmarker.faces.map(f => (
                   <div key={f.index} style={{ paddingLeft: 8 }}>
-                    Face {f.index}: yaw={f.yaw}&deg; pitch={f.pitch}&deg; roll={f.roll}&deg;
+                    <span style={{ fontWeight: f.isPrimary ? 500 : 400 }}>
+                      Face {f.index}{f.isPrimary ? ' (primary)' : ''}:
+                    </span>
+                    {' '}yaw={f.yaw}&deg; pitch={f.pitch}&deg; roll={f.roll}&deg;
+                    {f.bbox && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      bbox: {f.bbox.w}x{f.bbox.h} area={f.bbox.area}
+                      {f.sizeRatioToPrimary && <> sizeRatio={f.sizeRatioToPrimary}</>}
+                      {f.overlapWithPrimary && <> overlap={f.overlapWithPrimary}</>}
+                    </div>}
                   </div>
                 ))}
               </div>

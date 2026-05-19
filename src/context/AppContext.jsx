@@ -20,6 +20,8 @@ const initialState = {
     maxFaceYaw: 30,
     maxFacePitch: 20,
     maxFaceRoll: 20,
+    twoFaceSizeRatio: 30,
+    faceOverlapRatio: 20,
     occlusionThreshold: 50,
     audioMode: 'SYNC',
   },
