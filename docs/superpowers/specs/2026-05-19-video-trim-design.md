@@ -1,7 +1,7 @@
 # Quick Video Trim - Design Specification
 
 ## TLDR
-A lightweight browser-based video editor for frame-level trimming with automatic face detection. Upload video, add markers (manually or via YOLO), adjust trim windows, preview red segments on timeline, export trimmed video with audio fades.
+A lightweight browser-based video editor for frame-level trimming with automatic face detection. Upload video, add markers (manually or via YOLO), adjust trim windows, preview red segments on timeline, export trimmed video with three audio modes (SYNC with fades, Mute, or Music with auto fade-out).
 
 ---
 
@@ -97,7 +97,8 @@ src/
     confidenceThreshold: 50, // % (default 50)
     sizeJumpThreshold: 10,   // % (default 10)
     faceMovementThreshold: 30, // % of face width (default 30)
-    qualityThreshold: 50     // % confidence flag threshold (default 50)
+    qualityThreshold: 50,    // % confidence flag threshold (default 50)
+    audioMode: 'SYNC'        // 'SYNC' | 'Mute' | 'Music' (default 'SYNC')
   },
 
   // Calculated trim segments
@@ -133,7 +134,7 @@ src/
 - **V** = ControlBar: Play/pause button, speed display, keyboard hints
 - **M** = MarkerPanel: List of markers (manual + auto), add/remove/reposition, edit custom trim values
 - **D** = DetectorPanel: "Run Detection" button, detection progress, flagged overlaps, auto-marker review
-- **S** = SettingsPanel: 6 tunable threshold inputs (trmWin, trmIntv, confidenceThreshold, sizeJump, faceMovement, qualityThreshold)
+- **S** = SettingsPanel: 7 tunable inputs (trmWin, trmIntv, confidenceThreshold, sizeJump, faceMovement, qualityThreshold, audioMode)
 
 ---
 
@@ -231,16 +232,36 @@ src/
 
 ---
 
-### Feature 6: Audio Fades on Export
-**When:** During video export
-**Algorithm:**
-1. For each trim segment to be removed:
-   - First frame: fade in (gain envelope 0 → 1 over 1 frame duration)
-   - Last frame: fade out (gain envelope 1 → 0 over 1 frame duration)
-2. Use Web Audio API GainNode with exponential ramp curves
-3. Apply fade as new audio track in output file
+### Feature 6: Audio Mode Selection
+**Setting:** `audioMode` in SettingsPanel
+**Three Modes:**
 
-**Benefit:** Prevents audio click artifacts at segment boundaries
+**Mode 1: SYNC (Default)**
+- Audio stays synced with video throughout trimming
+- For each trim segment boundary:
+  - First frame of kept segment: fade in (0 → 1 gain over 1 frame duration)
+  - Last frame of kept segment: fade out (1 → 0 gain over 1 frame duration)
+- Use Web Audio API GainNode with exponential ramp curves
+- **Benefit:** Prevents audio click artifacts at segment boundaries
+
+**Mode 2: Mute**
+- Original audio is discarded
+- Output video has no audio track
+- No audio processing needed
+- **Use case:** Video with poor audio quality or distracting background noise
+
+**Mode 3: Music**
+- Audio is extracted from original video and treated as standalone track
+- Applied to entire output video (ignores trimming)
+- Automatically fade out at the end over 5 seconds
+- If audio is longer than video output, truncate to match video length
+- If audio is shorter, silence-pad to match video length
+- **Use case:** Replace dialogue/ambient audio with music or voiceover
+- **Algorithm:**
+  1. Extract audio from input video (all frames, no trimming)
+  2. In output, stretch/truncate audio to match trimmed video duration
+  3. Apply fade out envelope starting at (output_duration - 5 seconds)
+  4. Merge audio track with trimmed video
 
 ---
 
@@ -252,7 +273,7 @@ src/
 - Store in state.video
 
 ### Export Workflow
-**Input:** Current markers + settings
+**Input:** Current markers + settings (including audioMode)
 **Steps:**
 1. Calculate trim segments from markers + $trmWin + $trmIntv
 2. Invert to find **keep segments** (all non-trimmed ranges)
@@ -261,9 +282,24 @@ src/
    - Extract keep segments in order
    - Concatenate seamlessly
    - Encode to H.264 MP4
-4. Simultaneously generate audio fades via Web Audio API and apply to output
+4. **Audio processing** (based on audioMode):
+   - **SYNC mode:**
+     - Extract audio from keep segments (matching video trimming)
+     - Generate fade in/out envelopes at segment boundaries
+     - Apply envelopes via Web Audio API GainNode
+     - Merge processed audio with trimmed video
+   - **Mute mode:**
+     - Skip audio extraction entirely
+     - Output video with no audio track
+   - **Music mode:**
+     - Extract audio from original video (all frames, no trimming)
+     - Determine output video duration from trimmed video
+     - Truncate or silence-pad audio to match output video duration
+     - Generate 5-second fade out envelope starting at (duration - 5 seconds)
+     - Apply fade out via Web Audio API GainNode
+     - Merge processed audio with trimmed video
 5. Export two files:
-   - `output.mp4` - trimmed video
+   - `output.mp4` - trimmed video with processed audio
    - `output.json` - project metadata
 
 ### Project JSON Format
@@ -284,7 +320,8 @@ src/
     "confidenceThreshold": 50,
     "sizeJumpThreshold": 10,
     "faceMovementThreshold": 30,
-    "qualityThreshold": 50
+    "qualityThreshold": 50,
+    "audioMode": "SYNC"
   },
   "trimSegments": [
     { "startFrame": 135, "endFrame": 165, "reason": "marker_m1" }
@@ -349,8 +386,15 @@ Save MP4 + JSON to disk
 - **Disk space full:** Warn before export, cancel if insufficient space
 
 ### Audio Processing
-- **Web Audio API unavailable:** Fall back to silent fade (still prevent clicks)
-- **Fade generation fails:** Skip fades, export video without audio envelope (still usable)
+- **SYNC mode:**
+  - Web Audio API unavailable: fall back to silent fade (still prevent clicks)
+  - Fade generation fails: skip fades, export video without audio envelope (still usable)
+- **Mute mode:**
+  - No audio processing, always succeeds
+- **Music mode:**
+  - Audio extraction fails: show error, user retries or switches audioMode
+  - Audio duration mismatch: truncate long audio or silence-pad short audio
+  - Fade out generation fails: skip fade out, export with full-volume audio (still usable)
 
 ---
 
@@ -413,7 +457,9 @@ Save MP4 + JSON to disk
 ✅ Fine-tune individual markers (Mode 2)
 ✅ YOLO detects: face on/off, confidence crossing, size jump, movement
 ✅ Export trimmed video + project JSON
-✅ Audio fades prevent clipping on segment boundaries
+✅ Audio Mode SYNC: fades prevent clipping on segment boundaries
+✅ Audio Mode Mute: output video with no audio
+✅ Audio Mode Music: extract original audio, apply 5-second fade out, merge with trimmed video
 ✅ All keyboard shortcuts responsive
 ✅ Panels toggle cleanly without blocking timeline
 
