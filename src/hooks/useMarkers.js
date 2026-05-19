@@ -25,6 +25,7 @@ export function useMarkers({ enableShortcuts = false } = {}) {
       customTrmIntv: null,
     }
     dispatch({ type: 'ADD_MARKER', payload: marker })
+    dispatch({ type: 'SET_SELECTED_MARKER', payload: marker.id })
     return marker
   }, [video, state.markers, dispatch, toast])
 

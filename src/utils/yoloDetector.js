@@ -8,6 +8,7 @@ const DEFAULT_DISTINCT_CENTER_RATIO = 0.35
 const DEFAULT_OVERLAP_MIN_IOU = 0.12
 const DEFAULT_OVERLAP_MIN_SMALLER_AREA = 0.25
 const DEFAULT_MIN_OVERLAP_SAMPLES = 2
+const CALIBRATION_NMS_IOU = 0.95
 
 let serverReady = false
 let serverModel = null
@@ -26,6 +27,15 @@ export async function loadModel() {
 async function canvasToBlob(canvas) {
   return await new Promise((res) => {
     canvas.toBlob((b) => res(b), 'image/jpeg', 0.85)
+  })
+}
+
+async function seekVideo(videoEl, time) {
+  if (Math.abs(videoEl.currentTime - time) < 0.0005 && videoEl.readyState >= 2) return
+  await new Promise((res) => {
+    const done = () => res()
+    videoEl.addEventListener('seeked', done, { once: true })
+    videoEl.currentTime = time
   })
 }
 
@@ -108,6 +118,27 @@ function findOverlappingFacePair(boxes, config) {
     }
   }
   return null
+}
+
+function findBestOverlapCandidate(boxes) {
+  let best = null
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const metrics = boxMetrics(boxes[i], boxes[j])
+      if (metrics.iou <= 0 || metrics.smallerOverlap <= 0) continue
+
+      const centerSeparationRatio = centerDistance(boxes[i], boxes[j]) / minFaceSide(boxes[i], boxes[j])
+      if (centerSeparationRatio <= 0.02) continue
+
+      const candidate = { boxes: [boxes[i], boxes[j]], centerSeparationRatio, ...metrics }
+      const candidateScore = candidate.smallerOverlap * 2 + candidate.iou + Math.min(candidate.centerSeparationRatio, 2) * 0.1
+      const bestScore = best
+        ? best.smallerOverlap * 2 + best.iou + Math.min(best.centerSeparationRatio, 2) * 0.1
+        : -1
+      if (candidateScore > bestScore) best = candidate
+    }
+  }
+  return best
 }
 
 function buildOverlapRanges(frames, sampleStep, maxFrame, config) {
@@ -208,6 +239,125 @@ function confidenceStats(faces) {
   }
 }
 
+function percentile(values, rank) {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * rank)))
+  return sorted[index]
+}
+
+function thresholdBelowObserved(values, { max = 100, min = 1 } = {}) {
+  const observed = percentile(values, 0.2) * 100
+  return clamp(Math.floor(observed * 0.9), min, max)
+}
+
+function longestContiguousSampleRun(samples, sampleStep) {
+  if (!samples.length) return 0
+  let longest = 1
+  let current = 1
+  for (let i = 1; i < samples.length; i += 1) {
+    if (samples[i].frameNumber - samples[i - 1].frameNumber <= sampleStep + 1) {
+      current += 1
+    } else {
+      current = 1
+    }
+    longest = Math.max(longest, current)
+  }
+  return longest
+}
+
+export async function snapshotOverlapCalibration(videoEl, videoMeta, settings, targetFrame, onProgress) {
+  const { fps = 30, totalFrames = 0, width, height } = videoMeta
+  if (!videoEl || totalFrames <= 0) throw new Error('No video loaded')
+
+  const centerFrame = clampFrame(targetFrame, totalFrames)
+  const sampleStep = Math.max(1, Math.floor(fps / 15))
+  const halfWindowFrames = Math.max(sampleStep * 2, Math.round(fps))
+  const startFrame = clampFrame(centerFrame - halfWindowFrames, totalFrames)
+  const endFrame = clampFrame(centerFrame + halfWindowFrames, totalFrames)
+  const scanFrameCount = Math.max(1, endFrame - startFrame + 1)
+  const confThresh = Number.isFinite(settings.confidenceThreshold) ? settings.confidenceThreshold / 100 : 0.5
+  const qualThresh = Number.isFinite(settings.qualityThreshold) ? settings.qualityThreshold / 100 : 0.5
+  const serverConf = Math.max(0.001, Math.min(confThresh, qualThresh, 0.05))
+
+  const offscreen = document.createElement('canvas')
+  offscreen.width = width || 640
+  offscreen.height = height || 360
+  const ctx = offscreen.getContext('2d')
+
+  const samples = []
+  let scannedFrames = 0
+
+  for (let f = startFrame; f <= endFrame; f += sampleStep) {
+    onProgress?.((f - startFrame) / scanFrameCount)
+    await seekVideo(videoEl, f / fps)
+    ctx.drawImage(videoEl, 0, 0, offscreen.width, offscreen.height)
+
+    const detected = await detectFrame(offscreen, { conf: serverConf, iou: CALIBRATION_NMS_IOU })
+    const sortedDetected = detected.sort((a, b) => b.confidence - a.confidence)
+    const overlapFaces = dedupeFaceBoxes(sortedDetected)
+    const pair = findBestOverlapCandidate(overlapFaces)
+    scannedFrames += 1
+
+    if (pair) {
+      samples.push({
+        frameNumber: f,
+        detectedFaces: overlapFaces.length,
+        candidates: sortedDetected.length,
+        confidence: roundPercent(Math.max(...pair.boxes.map(box => box.confidence ?? 0))),
+        iou: pair.iou,
+        smallFaceCoverage: pair.smallerOverlap,
+        centerSeparation: pair.centerSeparationRatio,
+      })
+    }
+  }
+  onProgress?.(1)
+
+  if (!samples.length) {
+    return {
+      frameRange: [startFrame, endFrame],
+      scannedFrames,
+      samples,
+      settings: null,
+    }
+  }
+
+  const iouValues = samples.map(sample => sample.iou)
+  const coverageValues = samples.map(sample => sample.smallFaceCoverage)
+  const separationValues = samples.map(sample => sample.centerSeparation)
+  const longestRun = longestContiguousSampleRun(samples, sampleStep)
+  const overlapNmsIou = clamp(
+    Math.ceil(percentile(iouValues, 0.9) * 100 + 10),
+    Math.max(55, settings.overlapNmsIou ?? 55),
+    95
+  )
+
+  return {
+    frameRange: [startFrame, endFrame],
+    scannedFrames,
+    samples,
+    settings: {
+      detectionTestStartFrame: startFrame,
+      detectionTestEndFrame: endFrame,
+      overlapNmsIou,
+      overlapIoUThreshold: thresholdBelowObserved(iouValues),
+      overlapSmallFaceCoverage: thresholdBelowObserved(coverageValues),
+      overlapCenterSeparation: thresholdBelowObserved(separationValues, { max: 200, min: 0 }),
+      overlapMinSamples: clamp(Math.min(3, longestRun), 1, 30),
+    },
+    metrics: {
+      minIou: Math.min(...iouValues),
+      maxIou: Math.max(...iouValues),
+      minSmallFaceCoverage: Math.min(...coverageValues),
+      maxSmallFaceCoverage: Math.max(...coverageValues),
+      minCenterSeparation: Math.min(...separationValues),
+      maxCenterSeparation: Math.max(...separationValues),
+      longestRun,
+      sampleStep,
+    },
+  }
+}
+
 export async function runDetection(videoEl, videoMeta, settings, onProgress, getAbort, options = {}) {
   const { fps, totalFrames, width, height } = videoMeta
   const { confidenceThreshold, sizeJumpThreshold, faceMovementThreshold, qualityThreshold } = settings
@@ -239,8 +389,7 @@ export async function runDetection(videoEl, videoMeta, settings, onProgress, get
   for (let f = scanStartFrame; f <= scanEndFrame; f += sampleStep) {
     if (getAbort?.()) break
     onProgress?.((f - scanStartFrame) / scanFrameCount)
-    videoEl.currentTime = f / fps
-    await new Promise(res => { videoEl.onseeked = res })
+    await seekVideo(videoEl, f / fps)
     ctx.drawImage(videoEl, 0, 0, offscreen.width, offscreen.height)
 
     let detected = []

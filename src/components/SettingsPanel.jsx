@@ -1,37 +1,35 @@
 import { useApp } from '../context/AppContext'
 
-const FIELDS = [
-  { key: 'trmWin',               label: 'Trim Window (frames, odd)',   type: 'number', min: 1 },
-  { key: 'trmIntv',              label: 'Trim Interval (frames)',       type: 'number', min: 1 },
-  { key: 'confidenceThreshold',  label: 'Face Confidence Threshold %', type: 'number', min: 0, max: 100 },
-  { key: 'sizeJumpThreshold',    label: 'Size Jump Threshold %',        type: 'number', min: 0, max: 100 },
-  { key: 'faceMovementThreshold',label: 'Face Movement Threshold %',   type: 'number', min: 0, max: 100 },
-  { key: 'qualityThreshold',     label: 'Quality Drop Threshold %',    type: 'number', min: 0, max: 100 },
+const TRIM_FIELDS = [
+  { key: 'trmWin',  label: 'Trim Window (frames, odd)', type: 'number', min: 1 },
+  { key: 'trmIntv', label: 'Trim Interval (frames)',    type: 'number', min: 1 },
 ]
 
-const OVERLAP_FIELDS = [
-  { key: 'overlapNmsIou',            label: 'Overlap NMS IoU %',          type: 'number', min: 0, max: 100 },
-  { key: 'overlapIoUThreshold',      label: 'Overlap IoU Threshold %',    type: 'number', min: 0, max: 100 },
-  { key: 'overlapSmallFaceCoverage', label: 'Min Small Face Coverage %',  type: 'number', min: 0, max: 100 },
-  { key: 'overlapCenterSeparation',  label: 'Center Separation %',        type: 'number', min: 0, max: 200 },
-  { key: 'overlapMinSamples',        label: 'Min Overlap Samples',        type: 'number', min: 1, max: 30 },
+const QUALITY_GATES_FIELDS = [
+  { key: 'transnetThreshold',  label: 'TransNet Threshold %', type: 'number', min: 0, max: 100 },
+  { key: 'maxFaceYaw',         label: 'Max Face Yaw (degrees)', type: 'number', min: 0 },
+  { key: 'maxFacePitch',       label: 'Max Face Pitch (degrees)', type: 'number', min: 0 },
+  { key: 'maxFaceRoll',        label: 'Max Face Roll (degrees)', type: 'number', min: 0 },
+  { key: 'occlusionThreshold', label: 'Occlusion Threshold %', type: 'number', min: 0, max: 100 },
 ]
 
 const DEFAULT_SETTINGS = {
   trmWin: 31,
   trmIntv: 90,
-  confidenceThreshold: 50,
-  sizeJumpThreshold: 10,
-  faceMovementThreshold: 30,
-  qualityThreshold: 50,
   detectionTestSeconds: 10,
   detectionTestStartFrame: 0,
   detectionTestEndFrame: null,
-  overlapNmsIou: 55,
-  overlapIoUThreshold: 12,
-  overlapSmallFaceCoverage: 25,
-  overlapCenterSeparation: 35,
-  overlapMinSamples: 2,
+  detectionModels: {
+    transnetv2: true,
+    faceLandmarker: true,
+    occlusion: true,
+  },
+  transnetThreshold: 50,
+  maxFaceYaw: 30,
+  maxFacePitch: 20,
+  maxFaceRoll: 20,
+  occlusionThreshold: 50,
+  audioMode: 'SYNC',
 }
 
 export default function SettingsPanel({ onClose }) {
@@ -44,14 +42,21 @@ export default function SettingsPanel({ onClose }) {
       val = parseInt(raw, 10)
       if (isNaN(val) || val < 1) return
       if (val % 2 === 0) val += 1 // enforce odd
-    } else if (key === 'overlapMinSamples') {
-      val = parseInt(raw, 10)
-      if (isNaN(val) || val < 1) return
     } else if (key !== 'audioMode') {
       val = parseFloat(raw)
       if (isNaN(val)) return
     }
     dispatch({ type: 'UPDATE_SETTINGS', payload: { [key]: val } })
+  }
+
+  const updateDetectionModel = (model) => {
+    const currentModels = settings.detectionModels || {}
+    dispatch({
+      type: 'UPDATE_SETTINGS',
+      payload: {
+        detectionModels: { ...currentModels, [model]: !currentModels[model] }
+      }
+    })
   }
 
   return (
@@ -108,6 +113,27 @@ export default function SettingsPanel({ onClose }) {
             />
           </div>
         ))}
+        <button
+          className="btn"
+          style={{ width: '100%', fontSize: 11 }}
+          onClick={snapshotOverlapSettings}
+          disabled={!video.file || !selectedMarker || isDetecting}
+          title={selectedMarker ? `Use selected marker at frame ${selectedMarker.frameNumber}` : 'Select or add an overlap marker first'}
+        >
+          {isDetecting && snapshotProgress > 0
+            ? `Snapshotting ${snapshotProgress}%`
+            : `Snapshot From ${selectedMarker ? `Frame ${selectedMarker.frameNumber}` : 'Selected Marker'}`}
+        </button>
+        {lastSnapshot && (
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '6px 8px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+            <div>Snapshot frames {lastSnapshot.frameRange[0]}-{lastSnapshot.frameRange[1]}, {lastSnapshot.samples.length}/{lastSnapshot.scannedFrames} overlap samples.</div>
+            {lastSnapshot.metrics && (
+              <div>
+                IoU {pct(lastSnapshot.metrics.minIou)}-{pct(lastSnapshot.metrics.maxIou)}, coverage {pct(lastSnapshot.metrics.minSmallFaceCoverage)}-{pct(lastSnapshot.metrics.maxSmallFaceCoverage)}, separation {pct(lastSnapshot.metrics.minCenterSeparation)}-{pct(lastSnapshot.metrics.maxCenterSeparation)}.
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="section-divider">Audio Mode</div>
         <div className="form-row">

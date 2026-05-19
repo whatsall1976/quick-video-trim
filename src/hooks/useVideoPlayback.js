@@ -7,7 +7,7 @@ const SPEED_STEPS = [1, 2, 4, 6, 8, 10]
 
 export function useVideoPlayback(videoRef) {
   const { state, dispatch, toast } = useApp()
-  const { video, playback } = state
+  const { video, playback, isDetecting } = state
   const rafRef = useRef(null)
   const shiftStepRef = useRef(1)
   const frameRef = useRef(playback.currentFrame)
@@ -66,12 +66,12 @@ export function useVideoPlayback(videoRef) {
   // Sync video element to current frame (only when paused for scrubbing)
   useEffect(() => {
     const vid = videoRef?.current
-    if (!vid || !video.fps || playback.isPlaying) return
+    if (!vid || !video.fps || playback.isPlaying || isDetecting) return
     const targetTime = playback.currentFrame / video.fps
     if (Math.abs(vid.currentTime - targetTime) > 0.01) {
       vid.currentTime = targetTime
     }
-  }, [playback.currentFrame, playback.isPlaying, video.fps, videoRef])
+  }, [playback.currentFrame, playback.isPlaying, isDetecting, video.fps, videoRef])
 
   // Keyboard shortcuts
   useEffect(() => {

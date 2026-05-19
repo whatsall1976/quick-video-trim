@@ -26,6 +26,7 @@ export function useYOLODetection(videoRef) {
     }
 
     dispatch({ type: 'SET_DETECTING', payload: true })
+    dispatch({ type: 'SET_PLAYING', payload: false })
     dispatch({ type: 'SET_DETECTION_PROGRESS', payload: 0 })
 
     try {

@@ -122,9 +122,14 @@ def parse_yolo_output(
     raise ValueError(f"Unsupported ONNX output shape: {output.shape}")
 
   boxes = xywh_to_xyxy(pred[:, :4])
-  class_scores = pred[:, 4:]
-  class_ids = np.argmax(class_scores, axis=1)
-  scores = class_scores[np.arange(len(class_scores)), class_ids]
+  if pred.shape[1] == 5 or (pred.shape[1] > 5 and float(np.nanmax(pred[:, 5:])) > 1.5):
+    # YOLO face models commonly output x/y/w/h, confidence, then landmark x/y/score triples.
+    scores = pred[:, 4]
+    class_ids = np.zeros(len(pred), dtype=np.int64)
+  else:
+    class_scores = pred[:, 4:]
+    class_ids = np.argmax(class_scores, axis=1)
+    scores = class_scores[np.arange(len(class_scores)), class_ids]
 
   mask = scores >= conf
   boxes = boxes[mask]
@@ -153,7 +158,7 @@ def parse_yolo_output(
         "height": float(max(0.0, y2 - y1)),
         "confidence": float(scores[i]),
         "classId": class_id,
-        "className": "face" if pred.shape[1] == 5 else str(class_id),
+        "className": "face" if pred.shape[1] == 5 or class_id == 0 else str(class_id),
       }
     )
   return results

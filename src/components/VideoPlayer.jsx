@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext'
 
 export default function VideoPlayer({ videoRef, canvasRef }) {
   const { state, dispatch, toast } = useApp()
-  const { video, playback } = state
+  const { video, playback, isDetecting } = state
   const fileInputRef = useRef(null)
 
   // Draw current frame onto canvas continuously via RAF (for responsive scrubbing)
@@ -25,7 +25,7 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
     const loop = () => {
       const targetTime = playback.currentFrame / (video.fps || 30)
       // Only seek when paused (for scrubbing). During playback, let video play naturally.
-      if (!playback.isPlaying && Math.abs(vid.currentTime - targetTime) > 0.01) {
+      if (!playback.isPlaying && !isDetecting && Math.abs(vid.currentTime - targetTime) > 0.01) {
         vid.currentTime = targetTime
       }
       draw()
@@ -41,7 +41,7 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
       cancelAnimationFrame(rafId)
       clearInterval(timeoutId)
     }
-  }, [playback.currentFrame, playback.isPlaying, video, videoRef, canvasRef])
+  }, [playback.currentFrame, playback.isPlaying, isDetecting, video, videoRef, canvasRef])
 
   const loadFile = useCallback(async (file) => {
     if (!file) return
