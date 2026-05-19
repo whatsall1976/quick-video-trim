@@ -24,7 +24,7 @@ async function getFFmpeg(onLog) {
  * @param {function} onProgress ({ progress, message }) => void
  */
 export async function exportVideo(videoFile, trimSegments, videoMeta, audioMode, onProgress) {
-  const { fps, totalFrames, duration } = videoMeta
+  const { fps } = videoMeta
   const ff = await getFFmpeg((msg) => console.log('[ffmpeg]', msg))
 
   onProgress?.({ progress: 0.05, message: 'Loading video…' })
