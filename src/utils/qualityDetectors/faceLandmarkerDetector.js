@@ -33,6 +33,68 @@ function matrixToAngles(matrix) {
   return { yaw, pitch, roll }
 }
 
+/**
+ * Snapshot a single frame and return raw parameter values
+ * for calibration / reverse engineering thresholds
+ */
+export async function snapshotFaceParams(videoElement, frameNumber) {
+  const fl = await getLandmarker()
+  const fps = 30
+  const timeMs = (frameNumber / fps) * 1000
+
+  videoElement.currentTime = frameNumber / fps
+  await new Promise((resolve) => {
+    videoElement.addEventListener('seeked', resolve, { once: true })
+  })
+
+  const result = fl.detectForVideo(videoElement, timeMs)
+  const faceCount = result.faceLandmarks?.length || 0
+
+  const snapshot = {
+    frameNumber,
+    faceCount,
+    faces: []
+  }
+
+  for (let i = 0; i < faceCount; i++) {
+    const face = { index: i }
+
+    // Pose angles
+    if (result.facialTransformationMatrixes?.[i]) {
+      const angles = matrixToAngles(result.facialTransformationMatrixes[i])
+      face.yaw = Math.round(angles.yaw * 10) / 10
+      face.pitch = Math.round(angles.pitch * 10) / 10
+      face.roll = Math.round(angles.roll * 10) / 10
+    }
+
+    // Landmark visibility for occlusion
+    const lm = result.faceLandmarks[i]
+    const REGIONS = {
+      leftEye: [33, 133, 160, 159, 158, 144, 145, 153],
+      rightEye: [362, 263, 387, 386, 385, 373, 374, 380],
+      nose: [1, 2, 98, 327, 4, 5, 195],
+      lips: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291]
+    }
+
+    face.visibility = {}
+    for (const [region, indices] of Object.entries(REGIONS)) {
+      let total = 0
+      let count = 0
+      for (const idx of indices) {
+        if (lm[idx]) {
+          total += (lm[idx].visibility ?? 1.0)
+          count++
+        }
+      }
+      face.visibility[region] = count > 0 ? Math.round((total / count) * 100) / 100 : 0
+    }
+
+    snapshot.faces.push(face)
+  }
+
+  return snapshot
+}
+
 export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
   // settings = {maxFaceYaw, maxFacePitch, maxFaceRoll}
 
