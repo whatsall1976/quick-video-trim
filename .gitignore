@@ -22,4 +22,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-*.png
+*.pngpublic/models/face_landmarker.task

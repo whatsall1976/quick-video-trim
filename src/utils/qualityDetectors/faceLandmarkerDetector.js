@@ -1,152 +1,111 @@
 /**
- * Face Landmarker detector - Detects face quality issues
- * Uses histogram analysis and edge detection to evaluate face presence
- * Flags frames with:
- * - Low face sharpness (blurry faces)
- * - Dark/underexposed faces (poor lighting)
- * - Overlapping/multiple faces (poor framing)
- * - Inconsistent face detection (flickering detection)
+ * Face Landmarker detector - Uses MediaPipe FaceLandmarker
+ * Detects: yaw/pitch/roll violations, 0 faces, >1 faces
  */
+import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 
-export async function faceLandmarkerDetect(videoElement, frameRange) {
-  // frameRange = [startFrame, endFrame]
+let landmarker = null
+
+async function getLandmarker() {
+  if (landmarker) return landmarker
+  const vision = await FilesetResolver.forVisionTasks(
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
+  )
+  landmarker = await FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: '/models/face_landmarker.task',
+      delegate: 'GPU'
+    },
+    runningMode: 'VIDEO',
+    numFaces: 3,
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: true
+  })
+  return landmarker
+}
+
+function matrixToAngles(matrix) {
+  // 4x4 transformation matrix -> yaw/pitch/roll in degrees
+  const m = matrix.data
+  const pitch = Math.asin(-m[6]) * (180 / Math.PI)
+  const yaw = Math.atan2(m[2], m[10]) * (180 / Math.PI)
+  const roll = Math.atan2(m[4], m[5]) * (180 / Math.PI)
+  return { yaw, pitch, roll }
+}
+
+export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
+  // settings = {maxFaceYaw, maxFacePitch, maxFaceRoll}
 
   try {
     if (!videoElement || !videoElement.videoWidth) {
       return {
         rejectedRanges: [],
-        summary: { enabled: true, status: 'ok', message: 'Ready', count: 0 }
+        summary: { enabled: true, status: 'ok', message: 'No video', count: 0 }
       }
     }
 
+    const fl = await getLandmarker()
     const [startFrame, endFrame] = frameRange
     const fps = 30
     const rejectedRanges = []
+    const maxYaw = settings.maxFaceYaw || 30
+    const maxPitch = settings.maxFacePitch || 20
+    const maxRoll = settings.maxFaceRoll || 20
 
-    // Create canvas for frame analysis
-    const canvas = document.createElement('canvas')
-    canvas.width = videoElement.videoWidth
-    canvas.height = videoElement.videoHeight
-    const ctx = canvas.getContext('2d')
+    // Sample every 3 frames for accuracy
+    for (let frameNum = startFrame; frameNum <= endFrame; frameNum += 3) {
+      const timeMs = (frameNum / fps) * 1000
+      videoElement.currentTime = frameNum / fps
 
-    let lastHadFace = false
+      await new Promise((resolve) => {
+        const onSeeked = () => { resolve(); videoElement.removeEventListener('seeked', onSeeked) }
+        videoElement.addEventListener('seeked', onSeeked, { once: true })
+      })
 
-    // Sample every 10 frames for performance
-    for (let frameNum = startFrame; frameNum <= endFrame; frameNum += 10) {
-      try {
-        // Seek to frame
-        videoElement.currentTime = frameNum / fps
+      const result = fl.detectForVideo(videoElement, timeMs)
+      const faceCount = result.faceLandmarks?.length || 0
 
-        await new Promise((resolve) => {
-          const checkReady = () => {
-            if (videoElement.readyState >= 2) {
-              resolve()
-              videoElement.removeEventListener('seeked', checkReady)
-            } else {
-              setTimeout(checkReady, 10)
-            }
-          }
-          checkReady()
+      if (faceCount === 0) {
+        rejectedRanges.push({
+          startFrame: frameNum,
+          endFrame: Math.min(endFrame, frameNum + 3),
+          score: 0.9,
+          reason: 'No face detected'
         })
+        continue
+      }
 
-        // Draw frame to canvas
-        ctx.drawImage(videoElement, 0, 0)
+      if (faceCount > 1) {
+        rejectedRanges.push({
+          startFrame: frameNum,
+          endFrame: Math.min(endFrame, frameNum + 3),
+          score: 0.85,
+          reason: `Multiple faces detected (${faceCount})`
+        })
+        continue
+      }
 
-        // Get image data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const data = imageData.data
+      // Single face - check pose angles from transformation matrix
+      if (result.facialTransformationMatrixes?.length > 0) {
+        const angles = matrixToAngles(result.facialTransformationMatrixes[0])
 
-        // Analyze frame for face quality issues
-        let brightness = 0
-        let sharpness = 0
-        let edgeVariance = 0
-        const edgeMap = new Uint8Array((canvas.height - 2) * (canvas.width - 2))
-        let edgeIdx = 0
+        const yawExceeded = Math.abs(angles.yaw) > maxYaw
+        const pitchExceeded = Math.abs(angles.pitch) > maxPitch
+        const rollExceeded = Math.abs(angles.roll) > maxRoll
 
-        // First pass: brightness and edge detection
-        for (let y = 1; y < canvas.height - 1; y++) {
-          for (let x = 1; x < canvas.width - 1; x++) {
-            const idx = (y * canvas.width + x) * 4
-            const gray = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]
-            brightness += gray
+        if (yawExceeded || pitchExceeded || rollExceeded) {
+          const violations = []
+          if (yawExceeded) violations.push(`yaw ${Math.round(angles.yaw)}°`)
+          if (pitchExceeded) violations.push(`pitch ${Math.round(angles.pitch)}°`)
+          if (rollExceeded) violations.push(`roll ${Math.round(angles.roll)}°`)
 
-            // Sobel edge detection
-            const left = 0.299 * data[idx - 4] + 0.587 * data[idx - 3] + 0.114 * data[idx - 2]
-            const right = 0.299 * data[idx + 4] + 0.587 * data[idx + 5] + 0.114 * data[idx + 6]
-            const top = 0.299 * data[idx - canvas.width * 4] + 0.587 * data[idx - canvas.width * 4 + 1] + 0.114 * data[idx - canvas.width * 4 + 2]
-            const bottom = 0.299 * data[idx + canvas.width * 4] + 0.587 * data[idx + canvas.width * 4 + 1] + 0.114 * data[idx + canvas.width * 4 + 2]
-
-            const edge = Math.sqrt(((right - left) ** 2 + (bottom - top) ** 2) / 2)
-            edgeMap[edgeIdx++] = Math.min(255, edge)
-            sharpness += edge
-          }
-        }
-
-        brightness /= (canvas.width * canvas.height)
-        sharpness /= ((canvas.height - 2) * (canvas.width - 2))
-
-        // Calculate edge variance (detect overlapping faces via edge clustering)
-        const meanEdge = sharpness
-        for (let i = 0; i < edgeMap.length; i++) {
-          edgeVariance += (edgeMap[i] - meanEdge) ** 2
-        }
-        edgeVariance = Math.sqrt(edgeVariance / edgeMap.length)
-
-        // Detect face presence by edge density in center region
-        let centerEdges = 0
-        const centerY = Math.floor(canvas.height / 4)
-        const centerH = Math.floor(canvas.height / 2)
-        const centerX = Math.floor(canvas.width / 4)
-        const centerW = Math.floor(canvas.width / 2)
-
-        for (let y = centerY; y < centerY + centerH && y < canvas.height - 1; y++) {
-          for (let x = centerX; x < centerX + centerW && x < canvas.width - 1; x++) {
-            const idx = ((y - 1) * (canvas.width - 2) + (x - 1))
-            if (idx < edgeMap.length && edgeMap[idx] > 20) {
-              centerEdges++
-            }
-          }
-        }
-
-        const hasFace = centerEdges > (centerW * centerH * 0.05) // At least 5% edge pixels
-        const isTooDark = brightness < 80
-        const isTooBlurry = sharpness < 3
-        const hasOverlap = edgeVariance > 50 && centerEdges > (centerW * centerH * 0.15) // High variance + high edges = overlapping faces
-        const hasFlicker = lastHadFace !== hasFace // Face detection inconsistency
-
-        let flagFrame = false
-        let reason = ''
-
-        if (isTooDark && isTooBlurry) {
-          reason = 'Poor face quality: dark & blurry'
-          flagFrame = true
-        } else if (isTooDark) {
-          reason = 'Poor face quality: underexposed'
-          flagFrame = true
-        } else if (isTooBlurry) {
-          reason = 'Poor face quality: blurry'
-          flagFrame = true
-        } else if (hasOverlap && hasFace) {
-          reason = 'Overlapping/multiple faces detected'
-          flagFrame = true
-        } else if (hasFlicker) {
-          reason = 'Face detection inconsistent'
-          flagFrame = true
-        }
-
-        if (flagFrame) {
           rejectedRanges.push({
-            startFrame: Math.max(startFrame, frameNum - 5),
-            endFrame: Math.min(endFrame, frameNum + 5),
-            score: hasOverlap ? 0.85 : isTooDark && isTooBlurry ? 0.9 : 0.7,
-            reason
+            startFrame: frameNum,
+            endFrame: Math.min(endFrame, frameNum + 3),
+            score: 0.8,
+            reason: `Extreme angle: ${violations.join(', ')}`
           })
         }
-
-        lastHadFace = hasFace
-      } catch (e) {
-        // Skip frames that error
-        continue
       }
     }
 
@@ -155,7 +114,7 @@ export async function faceLandmarkerDetect(videoElement, frameRange) {
       summary: {
         enabled: true,
         status: 'ok',
-        message: `Found ${rejectedRanges.length} low-quality frames`,
+        message: `Found ${rejectedRanges.length} face issues`,
         count: rejectedRanges.length
       }
     }
@@ -165,7 +124,7 @@ export async function faceLandmarkerDetect(videoElement, frameRange) {
       summary: {
         enabled: true,
         status: 'error',
-        message: `Face Landmarker detection failed: ${error.message}`,
+        message: error.message,
         count: 0
       }
     }

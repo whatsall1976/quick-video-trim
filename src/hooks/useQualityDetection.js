@@ -105,9 +105,7 @@ export function useQualityDetection(videoRef) {
 
         if (state.settings.detectionModels.occlusion) {
           detectorPromises.push(
-            occlusionDetect(state.video.file, frameRange, state.settings.occlusionThreshold, (progress) =>
-              dispatch({ type: 'SET_DETECTION_PROGRESS', payload: Math.round(progress * 100) })
-            ).then((result) => ({
+            occlusionDetect(videoEl, frameRange, state.settings.occlusionThreshold).then((result) => ({
               key: 'occlusion',
               label: 'Occlusion',
               enabled: true,
