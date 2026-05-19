@@ -47,7 +47,6 @@ export async function occlusionDetect(videoElement, frameRange, threshold) {
 
     // Sample every 5 frames
     for (let frameNum = startFrame; frameNum <= endFrame; frameNum += 5) {
-      const timeMs = (frameNum / fps) * 1000
       videoElement.currentTime = frameNum / fps
 
       await new Promise((resolve) => {
@@ -55,7 +54,7 @@ export async function occlusionDetect(videoElement, frameRange, threshold) {
         videoElement.addEventListener('seeked', onSeeked, { once: true })
       })
 
-      const result = fl.detectForVideo(videoElement, timeMs)
+      const result = fl.detect(videoElement)
       if (!result.faceLandmarks?.length) continue
 
       const landmarks = result.faceLandmarks[0]

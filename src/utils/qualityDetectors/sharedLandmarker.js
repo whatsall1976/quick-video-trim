@@ -17,7 +17,7 @@ export async function getSharedLandmarker() {
       modelAssetPath: '/models/face_landmarker.task',
       delegate: 'GPU'
     },
-    runningMode: 'VIDEO',
+    runningMode: 'IMAGE',
     numFaces: 3,
     outputFaceBlendshapes: false,
     outputFacialTransformationMatrixes: true

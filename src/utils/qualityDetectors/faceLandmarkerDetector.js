@@ -20,14 +20,13 @@ function matrixToAngles(matrix) {
 export async function snapshotFaceParams(videoElement, frameNumber) {
   const fl = await getSharedLandmarker()
   const fps = 30
-  const timeMs = (frameNumber / fps) * 1000
 
   videoElement.currentTime = frameNumber / fps
   await new Promise((resolve) => {
     videoElement.addEventListener('seeked', resolve, { once: true })
   })
 
-  const result = fl.detectForVideo(videoElement, timeMs)
+  const result = fl.detect(videoElement)
   const faceCount = result.faceLandmarks?.length || 0
 
   const snapshot = {
@@ -96,7 +95,6 @@ export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
 
     // Sample every 3 frames for accuracy
     for (let frameNum = startFrame; frameNum <= endFrame; frameNum += 3) {
-      const timeMs = (frameNum / fps) * 1000
       videoElement.currentTime = frameNum / fps
 
       await new Promise((resolve) => {
@@ -104,7 +102,7 @@ export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
         videoElement.addEventListener('seeked', onSeeked, { once: true })
       })
 
-      const result = fl.detectForVideo(videoElement, timeMs)
+      const result = fl.detect(videoElement)
       const faceCount = result.faceLandmarks?.length || 0
 
       if (faceCount === 0) {
