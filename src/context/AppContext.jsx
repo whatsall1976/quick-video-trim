@@ -34,6 +34,7 @@ const initialState = {
   detectionProgress: 0,
   isDetecting: false,
   selectedMarkerId: null,
+  snapshotResult: null,
 }
 
 function calcTrimSegments(markers, settings) {
@@ -145,6 +146,9 @@ function reducer(state, action) {
 
     case 'SET_DETECTION_PROGRESS':
       return { ...state, detectionProgress: action.payload }
+
+    case 'SET_SNAPSHOT_RESULT':
+      return { ...state, snapshotResult: action.payload }
 
     case 'LOAD_PROJECT': {
       const { markers, settings, video } = action.payload

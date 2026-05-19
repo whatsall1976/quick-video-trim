@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useMarkers } from './useMarkers'
 import { transnetDetect } from '../utils/qualityDetectors/transnetDetector'
-import { faceLandmarkerDetect } from '../utils/qualityDetectors/faceLandmarkerDetector'
+import { faceLandmarkerDetect, snapshotFaceParams } from '../utils/qualityDetectors/faceLandmarkerDetector'
 import { occlusionDetect } from '../utils/qualityDetectors/occlusionDetector'
 import { mergeRejectedRanges } from '../utils/qualityDetectors/ranges'
 
@@ -179,5 +179,68 @@ export function useQualityDetection(videoRef) {
     [state.video, state.settings, dispatch, toast, addMarker, videoRef]
   )
 
-  return { runDetectionPipeline }
+  const snapshotCurrentFrame = useCallback(
+    async () => {
+      const videoEl = videoRef?.current
+      if (!videoEl || !videoEl.videoWidth) {
+        toast('No video loaded', 'warning')
+        return
+      }
+
+      const frameNumber = state.playback.currentFrame
+
+      const result = { frameNumber, detectors: {} }
+
+      // Face Landmarker snapshot (yaw/pitch/roll + face count)
+      if (state.settings.detectionModels.faceLandmarker) {
+        try {
+          const snap = await snapshotFaceParams(videoEl, frameNumber)
+          result.detectors.faceLandmarker = snap
+        } catch (err) {
+          result.detectors.faceLandmarker = { error: err.message }
+        }
+      }
+
+      // Occlusion snapshot (visibility scores) - reuses face landmarker data
+      if (state.settings.detectionModels.occlusion) {
+        // snapshotFaceParams already includes visibility data,
+        // but if faceLandmarker is disabled we still need to run it for occlusion
+        if (!result.detectors.faceLandmarker || result.detectors.faceLandmarker.error) {
+          try {
+            const snap = await snapshotFaceParams(videoEl, frameNumber)
+            result.detectors.occlusion = {
+              faceCount: snap.faceCount,
+              faces: snap.faces.map(f => ({
+                index: f.index,
+                visibility: f.visibility,
+              })),
+            }
+          } catch (err) {
+            result.detectors.occlusion = { error: err.message }
+          }
+        } else {
+          // Extract visibility from the already-run faceLandmarker snapshot
+          const snap = result.detectors.faceLandmarker
+          result.detectors.occlusion = {
+            faceCount: snap.faceCount,
+            faces: snap.faces.map(f => ({
+              index: f.index,
+              visibility: f.visibility,
+            })),
+          }
+        }
+      }
+
+      // TransNetV2 - N/A for single frame (needs frame sequence)
+      if (state.settings.detectionModels.transnetv2) {
+        result.detectors.transnetv2 = { note: 'TransNetV2 requires frame sequence, not applicable for single-frame snapshot' }
+      }
+
+      dispatch({ type: 'SET_SNAPSHOT_RESULT', payload: result })
+      toast(`Snapshot frame ${frameNumber} complete`, 'success', 3000)
+    },
+    [state.video, state.playback.currentFrame, state.settings, dispatch, toast, videoRef]
+  )
+
+  return { runDetectionPipeline, snapshotCurrentFrame }
 }

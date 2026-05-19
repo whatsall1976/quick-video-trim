@@ -4,8 +4,8 @@ import { useQualityDetection } from '../hooks/useQualityDetection'
 
 export default function DetectorPanel({ videoRef, onClose }) {
   const { state, dispatch, toast } = useApp()
-  const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId, settings } = state
-  const { runDetectionPipeline } = useQualityDetection(videoRef)
+  const { isDetecting, detectionProgress, detectionResults, markers, video, selectedMarkerId, settings, snapshotResult } = state
+  const { runDetectionPipeline, snapshotCurrentFrame } = useQualityDetection(videoRef)
   const { selectMarker } = useMarkers()
 
   const flagged = markers.filter(m => m.flagged)
@@ -168,6 +168,66 @@ export default function DetectorPanel({ videoRef, onClose }) {
               <div className="progress-bar-fill" style={{ width: `${detectionProgress}%` }} />
             </div>
             <div className="detection-status">{detectionProgress}% complete</div>
+          </div>
+        )}
+
+        {/* Snapshot / Reverse Engineering */}
+        <div className="section-divider">Snapshot (Reverse Engineer)</div>
+        <button
+          className="btn"
+          style={{ width: '100%', fontSize: 11 }}
+          onClick={snapshotCurrentFrame}
+          disabled={!video.file || isDetecting}
+        >
+          Snapshot Current Frame (#{state.playback.currentFrame})
+        </button>
+        {snapshotResult && (
+          <div style={{
+            padding: '8px 10px',
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 11,
+            lineHeight: 1.6,
+          }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>
+              Frame {snapshotResult.frameNumber}
+            </div>
+
+            {snapshotResult.detectors.faceLandmarker && !snapshotResult.detectors.faceLandmarker.error && (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontWeight: 500, color: 'var(--accent)' }}>Face Landmarker</div>
+                <div>Faces: {snapshotResult.detectors.faceLandmarker.faceCount}</div>
+                {snapshotResult.detectors.faceLandmarker.faces.map(f => (
+                  <div key={f.index} style={{ paddingLeft: 8 }}>
+                    Face {f.index}: yaw={f.yaw}&deg; pitch={f.pitch}&deg; roll={f.roll}&deg;
+                  </div>
+                ))}
+              </div>
+            )}
+            {snapshotResult.detectors.faceLandmarker?.error && (
+              <div style={{ color: 'var(--danger)' }}>Face Landmarker: {snapshotResult.detectors.faceLandmarker.error}</div>
+            )}
+
+            {snapshotResult.detectors.occlusion && !snapshotResult.detectors.occlusion.error && (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontWeight: 500, color: 'var(--accent)' }}>Occlusion</div>
+                {snapshotResult.detectors.occlusion.faces.map(f => (
+                  <div key={f.index} style={{ paddingLeft: 8 }}>
+                    Face {f.index}: leftEye={f.visibility.leftEye} rightEye={f.visibility.rightEye} nose={f.visibility.nose} lips={f.visibility.lips}
+                  </div>
+                ))}
+              </div>
+            )}
+            {snapshotResult.detectors.occlusion?.error && (
+              <div style={{ color: 'var(--danger)' }}>Occlusion: {snapshotResult.detectors.occlusion.error}</div>
+            )}
+
+            {snapshotResult.detectors.transnetv2 && (
+              <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                TransNetV2: {snapshotResult.detectors.transnetv2.note}
+              </div>
+            )}
           </div>
         )}
 
