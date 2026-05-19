@@ -22,18 +22,11 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
     // Always draw via RAF for responsiveness
     let rafId
     let timeoutId
-    let lastLogTime = 0
     const loop = () => {
       const targetTime = playback.currentFrame / (video.fps || 30)
       // Keep seeking video element in sync with current frame
       if (Math.abs(vid.currentTime - targetTime) > 0.001) {
         vid.currentTime = targetTime
-      }
-      // Log playback state occasionally for debugging
-      const now = Date.now()
-      if (now - lastLogTime > 2000) {
-        console.log('[DEBUG] VideoPlayer state:', { isPlaying: playback.isPlaying, currentFrame: playback.currentFrame, vidTime: vid.currentTime.toFixed(3) })
-        lastLogTime = now
       }
       draw()
       rafId = requestAnimationFrame(loop)
