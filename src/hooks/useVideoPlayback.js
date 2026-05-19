@@ -3,12 +3,20 @@ import { useApp } from '../context/AppContext'
 
 const SPEED_STEPS = [1, 2, 4, 6, 8, 10]
 
+// Keep a module-level ref map so tick can read latest values
+
 export function useVideoPlayback(videoRef) {
   const { state, dispatch, toast } = useApp()
   const { video, playback } = state
   const rafRef = useRef(null)
   const lastTimestampRef = useRef(null)
   const shiftStepRef = useRef(1)
+  const frameRef = useRef(playback.currentFrame)
+  const totalFramesRef = useRef(video.totalFrames)
+
+  // Keep refs in sync with state
+  frameRef.current = playback.currentFrame
+  totalFramesRef.current = video.totalFrames
   const shiftStepTimerRef = useRef(null)
 
   // Advance frame by delta, clamp to valid range
@@ -16,24 +24,29 @@ export function useVideoPlayback(videoRef) {
     dispatch({ type: 'SET_FRAME', payload: Math.max(0, Math.min(video.totalFrames - 1, playback.currentFrame + delta)) })
   }, [dispatch, playback.currentFrame, video.totalFrames])
 
-  // RAF playback loop
+  // Stable refs for RAF (avoids stale closures)
+  const fpsRef = useRef(video.fps)
+  const speedRef = useRef(playback.playbackSpeed)
+  fpsRef.current = video.fps
+  speedRef.current = playback.playbackSpeed
+
+  // RAF playback loop — uses refs only to avoid recreating on every state change
   const tick = useCallback((timestamp) => {
     if (!lastTimestampRef.current) lastTimestampRef.current = timestamp
     const elapsed = timestamp - lastTimestampRef.current
-    const frameDuration = 1000 / (video.fps * playback.playbackSpeed)
+    const frameDuration = 1000 / ((fpsRef.current || 30) * (speedRef.current || 1))
 
     if (elapsed >= frameDuration) {
       lastTimestampRef.current = timestamp
-      dispatch(prev => {
-        const next = prev.playback.currentFrame + 1
-        if (next >= prev.video.totalFrames) {
-          return { type: 'SET_PLAYING', payload: false }
-        }
-        return { type: 'SET_FRAME', payload: next }
-      })
+      const next = frameRef.current + 1
+      if (next >= totalFramesRef.current) {
+        dispatch({ type: 'SET_PLAYING', payload: false })
+      } else {
+        dispatch({ type: 'SET_FRAME', payload: next })
+      }
     }
     rafRef.current = requestAnimationFrame(tick)
-  }, [video.fps, playback.playbackSpeed, dispatch])
+  }, [dispatch])
 
   // Start/stop RAF
   useEffect(() => {
