@@ -8,7 +8,6 @@ const DEFAULT_DISTINCT_CENTER_RATIO = 0.35
 const DEFAULT_OVERLAP_MIN_IOU = 0.12
 const DEFAULT_OVERLAP_MIN_SMALLER_AREA = 0.25
 const DEFAULT_MIN_OVERLAP_SAMPLES = 2
-const CALIBRATION_NMS_IOU = 0.95
 
 let serverReady = false
 let serverModel = null
