@@ -12,7 +12,7 @@ const FIELDS = [
 const OVERLAP_FIELDS = [
   { key: 'overlapNmsIou',            label: 'Overlap NMS IoU %',          type: 'number', min: 0, max: 100 },
   { key: 'overlapIoUThreshold',      label: 'Overlap IoU Threshold %',    type: 'number', min: 0, max: 100 },
-  { key: 'overlapSmallFaceCoverage', label: 'Small Face Coverage %',      type: 'number', min: 0, max: 100 },
+  { key: 'overlapSmallFaceCoverage', label: 'Min Small Face Coverage %',  type: 'number', min: 0, max: 100 },
   { key: 'overlapCenterSeparation',  label: 'Center Separation %',        type: 'number', min: 0, max: 200 },
   { key: 'overlapMinSamples',        label: 'Min Overlap Samples',        type: 'number', min: 1, max: 30 },
 ]

@@ -65,8 +65,8 @@ export function useVideoPlayback(videoRef) {
     const vid = videoRef?.current
     if (!vid || !video.fps) return
     const targetTime = playback.currentFrame / video.fps
-    // Only seek when paused (avoid fighting with natural playback)
-    if (!playback.isPlaying && Math.abs(vid.currentTime - targetTime) > 0.001) {
+    // Keep video element in sync with current frame
+    if (Math.abs(vid.currentTime - targetTime) > 0.001) {
       vid.currentTime = targetTime
     }
   }, [playback.currentFrame, playback.isPlaying, video.fps, videoRef])

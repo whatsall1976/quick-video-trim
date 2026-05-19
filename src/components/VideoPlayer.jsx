@@ -26,7 +26,7 @@ export default function VideoPlayer({ videoRef, canvasRef }) {
     const loop = () => {
       const targetTime = playback.currentFrame / (video.fps || 30)
       // Keep seeking video element in sync with current frame
-      if (!playback.isPlaying && Math.abs(vid.currentTime - targetTime) > 0.001) {
+      if (Math.abs(vid.currentTime - targetTime) > 0.001) {
         vid.currentTime = targetTime
       }
       // Log playback state occasionally for debugging

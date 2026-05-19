@@ -102,7 +102,7 @@ function findOverlappingFacePair(boxes, config) {
       const metrics = boxMetrics(boxes[i], boxes[j])
       const centerSeparationRatio = centerDistance(boxes[i], boxes[j]) / minFaceSide(boxes[i], boxes[j])
       const distinctCenters = centerSeparationRatio >= config.distinctCenterRatio
-      if (distinctCenters && (metrics.iou >= config.minIou || metrics.smallerOverlap >= config.minSmallerArea)) {
+      if (distinctCenters && metrics.iou >= config.minIou && metrics.smallerOverlap >= config.minSmallerArea) {
         return { boxes: [boxes[i], boxes[j]], centerSeparationRatio, ...metrics }
       }
     }
