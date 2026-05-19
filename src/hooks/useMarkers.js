@@ -47,6 +47,10 @@ export function useMarkers() {
   useEffect(() => {
     const onKey = (e) => {
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
+      // Debug: log all Shift+M attempts
+      if (e.shiftKey && (e.code === 'KeyM' || e.key === 'M' || e.key === 'm')) {
+        console.log('[DEBUG] Shift+M detected', { metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, code: e.code, key: e.key })
+      }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyM') {
         e.preventDefault()
         if (!video.file) { toast('No video loaded', 'warning'); return }

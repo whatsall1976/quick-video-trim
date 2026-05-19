@@ -81,6 +81,7 @@ export function useVideoPlayback(videoRef) {
       if (e.code === 'Space') {
         e.preventDefault()
         if (!video.file) return
+        console.log('[DEBUG] Space pressed, toggling play:', isPlaying, '→', !isPlaying)
         dispatch({ type: 'SET_PLAYING', payload: !isPlaying })
       }
 
