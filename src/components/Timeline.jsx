@@ -103,10 +103,10 @@ export default function Timeline() {
 
       <div className="timeline-labels">
         <span>{fmt(0)}</span>
-        <span>{fmt(Math.floor((video.totalFrames - 1) / 4))}</span>
-        <span>{fmt(Math.floor((video.totalFrames - 1) / 2))}</span>
-        <span>{fmt(Math.floor((video.totalFrames - 1) * 3 / 4))}</span>
-        <span>{fmt(video.totalFrames > 0 ? video.totalFrames - 1 : 0)}</span>
+        <span>{fmt(Math.max(0, Math.floor((video.totalFrames - 1) / 4)))}</span>
+        <span>{fmt(Math.max(0, Math.floor((video.totalFrames - 1) / 2)))}</span>
+        <span>{fmt(Math.max(0, Math.floor((video.totalFrames - 1) * 3 / 4)))}</span>
+        <span>{fmt(Math.max(0, video.totalFrames - 1))}</span>
       </div>
     </div>
   )
