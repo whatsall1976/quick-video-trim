@@ -1,7 +1,6 @@
 import { useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useMarkers } from './useMarkers'
-import { dissolveDetect, snapshotDissolve } from '../utils/qualityDetectors/dissolveDetector'
 import { faceLandmarkerDetect, snapshotFaceParams } from '../utils/qualityDetectors/faceLandmarkerDetector'
 import { occlusionDetect } from '../utils/qualityDetectors/occlusionDetector'
 import { mergeRejectedRanges } from '../utils/qualityDetectors/ranges'
@@ -47,18 +46,9 @@ export function useQualityDetection(videoRef) {
       dispatch({ type: 'SET_DETECTION_PROGRESS', payload: 0 })
 
       try {
-        // Run detectors SEQUENTIALLY - they all seek videoElement.currentTime
+        // Run detectors SEQUENTIALLY - they share the video element seek position
         const modelRuns = []
 
-        // Dissolve detector first (client-side pixel math)
-        if (state.settings.detectionModels.dissolve) {
-          const result = await dissolveDetect(videoEl, frameRange, state.settings.dissolveThreshold)
-          modelRuns.push({ key: 'dissolve', label: 'Dissolve', enabled: true, ...result })
-        } else {
-          modelRuns.push({ key: 'dissolve', label: 'Dissolve', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
-        }
-
-        // Face Landmarker second
         if (state.settings.detectionModels.faceLandmarker) {
           const result = await faceLandmarkerDetect(videoEl, frameRange, {
             maxFaceYaw: state.settings.maxFaceYaw,
@@ -70,7 +60,6 @@ export function useQualityDetection(videoRef) {
           modelRuns.push({ key: 'faceLandmarker', label: 'Face Landmarker', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
 
-        // Occlusion last
         if (state.settings.detectionModels.occlusion) {
           const result = await occlusionDetect(videoEl, frameRange, state.settings.occlusionThreshold)
           modelRuns.push({ key: 'occlusion', label: 'Occlusion', enabled: true, ...result })
@@ -78,7 +67,6 @@ export function useQualityDetection(videoRef) {
           modelRuns.push({ key: 'occlusion', label: 'Occlusion', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
 
-        // Merge rejected ranges
         const allRanges = []
         for (const run of modelRuns) {
           if (run.rejectedRanges) {
@@ -126,18 +114,6 @@ export function useQualityDetection(videoRef) {
       const frameNumber = state.playback.currentFrame
       const result = { frameNumber, detectors: {} }
 
-      // Dissolve snapshot
-      if (state.settings.detectionModels.dissolve) {
-        try {
-          const fps = state.video.fps || 30
-          const totalFrames = state.video.totalFrames || 0
-          result.detectors.dissolve = await snapshotDissolve(videoEl, frameNumber, fps, totalFrames)
-        } catch (err) {
-          result.detectors.dissolve = { error: err.message }
-        }
-      }
-
-      // Face Landmarker snapshot
       if (state.settings.detectionModels.faceLandmarker) {
         try {
           result.detectors.faceLandmarker = await snapshotFaceParams(videoEl, frameNumber)
@@ -146,7 +122,6 @@ export function useQualityDetection(videoRef) {
         }
       }
 
-      // Occlusion snapshot
       if (state.settings.detectionModels.occlusion) {
         if (!result.detectors.faceLandmarker || result.detectors.faceLandmarker.error) {
           try {

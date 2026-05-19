@@ -6,7 +6,6 @@ const TRIM_FIELDS = [
 ]
 
 const QUALITY_GATES_FIELDS = [
-  { key: 'dissolveThreshold',  label: 'Dissolve Threshold %', type: 'number', min: 0, max: 100 },
   { key: 'maxFaceYaw',         label: 'Max Face Yaw (degrees)', type: 'number', min: 0 },
   { key: 'maxFacePitch',       label: 'Max Face Pitch (degrees)', type: 'number', min: 0 },
   { key: 'maxFaceRoll',        label: 'Max Face Roll (degrees)', type: 'number', min: 0 },
@@ -20,11 +19,9 @@ const DEFAULT_SETTINGS = {
   detectionTestStartFrame: 0,
   detectionTestEndFrame: null,
   detectionModels: {
-    dissolve: true,
     faceLandmarker: true,
     occlusion: true,
   },
-  dissolveThreshold: 50,
   maxFaceYaw: 30,
   maxFacePitch: 20,
   maxFaceRoll: 20,
@@ -106,16 +103,6 @@ export default function SettingsPanel({ onClose }) {
         <div className="section-divider">Quality Gates</div>
 
         <div style={{ marginBottom: '8px' }}>
-          <div className="form-row">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={settings.detectionModels?.dissolve ?? true}
-                onChange={() => updateDetectionModel('dissolve')}
-              />
-              <span className="form-label" style={{ margin: 0 }}>Dissolve / Crossfade</span>
-            </label>
-          </div>
           <div className="form-row">
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
               <input

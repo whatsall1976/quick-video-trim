@@ -14,11 +14,9 @@ const initialState = {
     detectionTestStartFrame: 0,
     detectionTestEndFrame: null,
     detectionModels: {
-      dissolve: true,
       faceLandmarker: true,
       occlusion: true,
     },
-    dissolveThreshold: 50,
     maxFaceYaw: 30,
     maxFacePitch: 20,
     maxFaceRoll: 20,

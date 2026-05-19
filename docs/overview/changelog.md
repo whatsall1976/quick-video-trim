@@ -4,20 +4,22 @@
 
 ### Added
 
-#### Task #5: Add POST /detect-transitions Endpoint
-- **Endpoint:** `POST /detect-transitions`
-- **Purpose:** Detect video transitions and crossfades using TransNetV2
-- **File:** `server/main.py:232-348`
-- **Request Body:** `frameRange`, `videoFile`, `threshold`
-- **Response:** Returns `status` (ok/missing/error) with `rejectedRanges` containing detected transitions
-- **Features:**
-  - Graceful handling when TransNetV2 not installed (returns `status: "missing"`)
-  - Frame extraction and RGB conversion from video file
-  - Transition detection with score-based filtering
-  - Range expansion to collect adjacent frames in transitions
-  - Overlap detection to avoid duplicate ranges
-  - Comprehensive error handling with descriptive messages
-- **Dependencies:** cv2 (OpenCV), torch, transnetv2
+#### Browser-side face quality detection (MediaPipe FaceLandmarker)
+- **Face Landmarker detector**: Detects extreme yaw/pitch/roll, 0 faces, >1 faces
+- **Occlusion detector**: Detects blocked eyes/nose/lips via landmark visibility scores
+- **Shared MediaPipe singleton**: Both detectors share one FaceLandmarker instance (numFaces: 3, IMAGE mode, GPU delegate)
+- **Snapshot tool**: Inspect raw face parameters at current frame for threshold calibration
+- **Sequential detection pipeline**: Detectors run sequentially to avoid video element seek race conditions
+- **Files**: `src/utils/qualityDetectors/faceLandmarkerDetector.js`, `occlusionDetector.js`, `sharedLandmarker.js`, `ranges.js`
+
+### Removed
+
+#### Server-side detection infrastructure
+- **Removed**: `server/` directory (main.py, requirements.txt), `.venv`, all Python dependencies
+- **Removed**: TransNetV2 transition detector — cannot detect mid-dissolve frames (only detects boundaries)
+- **Removed**: Dissolve detector (linear blend reconstruction) — cannot detect static double-exposure content
+- **Removed**: YOLO face detection server — replaced by browser-side MediaPipe
+- **Impact**: No Python/server required. All detection runs in browser via MediaPipe WASM
 
 ### Fixed
 

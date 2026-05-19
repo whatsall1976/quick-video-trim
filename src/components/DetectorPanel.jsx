@@ -223,25 +223,6 @@ export default function DetectorPanel({ videoRef, onClose }) {
               <div style={{ color: 'var(--danger)' }}>Occlusion: {snapshotResult.detectors.occlusion.error}</div>
             )}
 
-            {snapshotResult.detectors.dissolve && !snapshotResult.detectors.dissolve.error && (
-              <div style={{ marginBottom: 6 }}>
-                <div style={{ fontWeight: 500, color: snapshotResult.detectors.dissolve.isDissolve ? 'var(--danger)' : 'var(--accent)' }}>
-                  Dissolve: {snapshotResult.detectors.dissolve.isDissolve ? 'YES - DISSOLVE DETECTED' : 'No'}
-                </div>
-                {(snapshotResult.detectors.dissolve.tests || []).map((t, i) => (
-                  <div key={i} style={{
-                    paddingLeft: 8,
-                    color: t.isDissolve ? 'var(--danger)' : 'var(--text-secondary)',
-                    fontWeight: t.isDissolve ? 500 : 400,
-                  }}>
-                    gap={t.gap} [{t.frameRange[0]}-{t.frameRange[1]}]: reconErr={t.reconError} sceneΔ={t.sceneChange} {t.isDissolve ? 'DISSOLVE' : ''}
-                  </div>
-                ))}
-              </div>
-            )}
-            {snapshotResult.detectors.dissolve?.error && (
-              <div style={{ color: 'var(--danger)' }}>Dissolve: {snapshotResult.detectors.dissolve.error}</div>
-            )}
           </div>
         )}
 
