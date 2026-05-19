@@ -110,6 +110,8 @@ def parse_yolo_output(
   pad_x: int,
   pad_y: int,
   image_size: tuple[int, int],
+  iou_thresh: float,
+  max_det: int,
 ) -> list[dict[str, Any]]:
   pred = np.squeeze(output)
   if pred.ndim != 2:
@@ -138,7 +140,7 @@ def parse_yolo_output(
   boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0, img_w)
   boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0, img_h)
 
-  keep = nms(boxes, scores, YOLO_IOU, YOLO_MAX_DET)
+  keep = nms(boxes, scores, iou_thresh, max_det)
   results: list[dict[str, Any]] = []
   for i in keep:
     x1, y1, x2, y2 = boxes[i]
@@ -181,6 +183,8 @@ def health() -> dict[str, Any]:
 async def detect(
   image: UploadFile = File(...),
   conf: float = 0.25,
+  iou: float | None = None,
+  max_det: int | None = None,
 ) -> dict[str, Any]:
   if image.content_type not in ("image/jpeg", "image/png", "image/webp"):
     raise HTTPException(status_code=415, detail=f"Unsupported image type: {image.content_type}")
@@ -196,10 +200,12 @@ async def detect(
   input_name = session.get_inputs()[0].name
   tensor, scale, pad_x, pad_y = letterbox(pil_image, input_size(session))
   outputs = session.run(None, {input_name: tensor})
-  boxes = parse_yolo_output(outputs[0], conf, scale, pad_x, pad_y, pil_image.size)
+  nms_iou = YOLO_IOU if iou is None else max(0.0, min(float(iou), 1.0))
+  det_limit = YOLO_MAX_DET if max_det is None else max(1, min(int(max_det), 500))
+  boxes = parse_yolo_output(outputs[0], conf, scale, pad_x, pad_y, pil_image.size, nms_iou, det_limit)
   dt_ms = int((time.time() - t0) * 1000)
 
-  return {"boxes": boxes, "ms": dt_ms, "model": MODEL_NAME}
+  return {"boxes": boxes, "ms": dt_ms, "model": MODEL_NAME, "nmsIou": nms_iou}
 
 
 if __name__ == "__main__":

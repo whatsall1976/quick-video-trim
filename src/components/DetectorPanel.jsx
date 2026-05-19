@@ -59,6 +59,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
   }
 
   const { thresholdCrossings = [], sizeJumps = [], movements = [], overlaps = [] } = detectionResults
+  const hasDetectionResults = thresholdCrossings.length > 0 || sizeJumps.length > 0 || movements.length > 0 || overlaps.length > 0
 
   return (
     <>
@@ -90,7 +91,7 @@ export default function DetectorPanel({ videoRef, onClose }) {
           <div className="empty-state">Load a video then click Run Detection to auto-place markers.</div>
         )}
 
-        {(thresholdCrossings.length > 0 || sizeJumps.length > 0 || movements.length > 0) && (
+        {hasDetectionResults && (
           <>
             <div className="section-divider">Detection Results</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
