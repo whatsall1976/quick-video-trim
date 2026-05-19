@@ -1,0 +1,62 @@
+import { useEffect, useCallback } from 'react'
+import { useApp } from '../context/AppContext'
+
+let markerId = 0
+
+export function useMarkers() {
+  const { state, dispatch, toast } = useApp()
+  const { video, playback } = state
+
+  const addMarker = useCallback((frameNumber, opts = {}) => {
+    if (!video.file) return
+    const frame = Math.max(0, Math.min(video.totalFrames - 1, Math.round(frameNumber)))
+    // Guard: duplicate frame
+    if (state.markers.some(m => m.frameNumber === frame)) {
+      toast('Marker already exists at this frame', 'warning')
+      return
+    }
+    const marker = {
+      id: `m${++markerId}`,
+      frameNumber: frame,
+      autoDetected: opts.autoDetected ?? false,
+      flagged: opts.flagged ?? false,
+      reason: opts.reason ?? null,
+      customTrmWin: null,
+      customTrmIntv: null,
+    }
+    dispatch({ type: 'ADD_MARKER', payload: marker })
+    return marker
+  }, [video, state.markers, dispatch, toast])
+
+  const removeMarker = useCallback((id) => {
+    dispatch({ type: 'REMOVE_MARKER', payload: id })
+  }, [dispatch])
+
+  const updateMarker = useCallback((id, changes) => {
+    if (changes.frameNumber !== undefined) {
+      const frame = Math.round(changes.frameNumber)
+      if (frame < 0 || frame >= video.totalFrames) {
+        toast('Marker position out of bounds', 'error')
+        return
+      }
+    }
+    dispatch({ type: 'UPDATE_MARKER', payload: { id, ...changes } })
+  }, [dispatch, video.totalFrames, toast])
+
+  // Cmd+Shift+M to add marker at current frame
+  useEffect(() => {
+    const onKey = (e) => {
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'M') {
+        e.preventDefault()
+        if (!video.file) { toast('No video loaded', 'warning'); return }
+        const m = addMarker(playback.currentFrame, { autoDetected: false })
+        if (m) toast(`Marker added at frame ${m.frameNumber}`, 'success', 1500)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [video, playback.currentFrame, addMarker, toast])
+
+  return { addMarker, removeMarker, updateMarker }
+}
