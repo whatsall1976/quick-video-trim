@@ -48,83 +48,37 @@ export function useQualityDetection(videoRef) {
       dispatch({ type: 'SET_DETECTION_PROGRESS', payload: 0 })
 
       try {
-        // 2. Read enabled detectors from settings
-        const enabledDetectors = []
-        if (state.settings.detectionModels.transnetv2) enabledDetectors.push('transnetv2')
-        if (state.settings.detectionModels.faceLandmarker) enabledDetectors.push('faceLandmarker')
-        if (state.settings.detectionModels.occlusion) enabledDetectors.push('occlusion')
+        // 2. Run detectors SEQUENTIALLY - they all seek videoElement.currentTime
+        // Running in parallel causes race conditions on the video seek position
+        const modelRuns = []
 
-        // 3. Dispatch detectors in parallel
-        const detectorPromises = []
-
+        // TransNetV2 first (extracts frames then sends to server)
         if (state.settings.detectionModels.transnetv2) {
-          detectorPromises.push(
-            transnetDetect(videoEl, frameRange, state.settings.transnetThreshold).then((result) => ({
-              key: 'transnetv2',
-              label: 'TransNetV2',
-              enabled: true,
-              ...result,
-            }))
-          )
+          const result = await transnetDetect(videoEl, frameRange, state.settings.transnetThreshold)
+          modelRuns.push({ key: 'transnetv2', label: 'TransNetV2', enabled: true, ...result })
         } else {
-          detectorPromises.push(
-            Promise.resolve({
-              key: 'transnetv2',
-              label: 'TransNetV2',
-              enabled: false,
-              rejectedRanges: [],
-              summary: { enabled: false, status: 'ok', count: 0 },
-            })
-          )
+          modelRuns.push({ key: 'transnetv2', label: 'TransNetV2', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
 
+        // Face Landmarker second
         if (state.settings.detectionModels.faceLandmarker) {
-          detectorPromises.push(
-            faceLandmarkerDetect(videoEl, frameRange, {
-              maxFaceYaw: state.settings.maxFaceYaw,
-              maxFacePitch: state.settings.maxFacePitch,
-              maxFaceRoll: state.settings.maxFaceRoll,
-            }).then((result) => ({
-              key: 'faceLandmarker',
-              label: 'Face Landmarker',
-              enabled: true,
-              ...result,
-            }))
-          )
+          const result = await faceLandmarkerDetect(videoEl, frameRange, {
+            maxFaceYaw: state.settings.maxFaceYaw,
+            maxFacePitch: state.settings.maxFacePitch,
+            maxFaceRoll: state.settings.maxFaceRoll,
+          })
+          modelRuns.push({ key: 'faceLandmarker', label: 'Face Landmarker', enabled: true, ...result })
         } else {
-          detectorPromises.push(
-            Promise.resolve({
-              key: 'faceLandmarker',
-              label: 'Face Landmarker',
-              enabled: false,
-              rejectedRanges: [],
-              summary: { enabled: false, status: 'ok', count: 0 },
-            })
-          )
+          modelRuns.push({ key: 'faceLandmarker', label: 'Face Landmarker', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
 
+        // Occlusion last
         if (state.settings.detectionModels.occlusion) {
-          detectorPromises.push(
-            occlusionDetect(videoEl, frameRange, state.settings.occlusionThreshold).then((result) => ({
-              key: 'occlusion',
-              label: 'Occlusion',
-              enabled: true,
-              ...result,
-            }))
-          )
+          const result = await occlusionDetect(videoEl, frameRange, state.settings.occlusionThreshold)
+          modelRuns.push({ key: 'occlusion', label: 'Occlusion', enabled: true, ...result })
         } else {
-          detectorPromises.push(
-            Promise.resolve({
-              key: 'occlusion',
-              label: 'Occlusion',
-              enabled: false,
-              rejectedRanges: [],
-              summary: { enabled: false, status: 'ok', count: 0 },
-            })
-          )
+          modelRuns.push({ key: 'occlusion', label: 'Occlusion', enabled: false, rejectedRanges: [], summary: { enabled: false, status: 'ok', count: 0 } })
         }
-
-        const modelRuns = await Promise.all(detectorPromises)
 
         // 4. Merge rejected ranges
         const allRanges = []

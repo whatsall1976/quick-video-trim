@@ -2,27 +2,7 @@
  * Occlusion detector - Detects eyes/nose/lips blockage
  * Uses MediaPipe FaceLandmarker visibility scores
  */
-import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
-
-let landmarker = null
-
-async function getLandmarker() {
-  if (landmarker) return landmarker
-  const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
-  )
-  landmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: '/models/face_landmarker.task',
-      delegate: 'GPU'
-    },
-    runningMode: 'VIDEO',
-    numFaces: 1,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: false
-  })
-  return landmarker
-}
+import { getSharedLandmarker } from './sharedLandmarker'
 
 // MediaPipe Face Landmarker landmark indices for key regions
 const LANDMARKS = {
@@ -59,7 +39,7 @@ export async function occlusionDetect(videoElement, frameRange, threshold) {
       }
     }
 
-    const fl = await getLandmarker()
+    const fl = await getSharedLandmarker()
     const [startFrame, endFrame] = frameRange
     const fps = 30
     const rejectedRanges = []

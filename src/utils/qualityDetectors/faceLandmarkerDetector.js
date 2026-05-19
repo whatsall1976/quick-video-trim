@@ -2,27 +2,7 @@
  * Face Landmarker detector - Uses MediaPipe FaceLandmarker
  * Detects: yaw/pitch/roll violations, 0 faces, >1 faces
  */
-import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
-
-let landmarker = null
-
-async function getLandmarker() {
-  if (landmarker) return landmarker
-  const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
-  )
-  landmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: '/models/face_landmarker.task',
-      delegate: 'GPU'
-    },
-    runningMode: 'VIDEO',
-    numFaces: 3,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: true
-  })
-  return landmarker
-}
+import { getSharedLandmarker } from './sharedLandmarker'
 
 function matrixToAngles(matrix) {
   // 4x4 transformation matrix -> yaw/pitch/roll in degrees
@@ -38,7 +18,7 @@ function matrixToAngles(matrix) {
  * for calibration / reverse engineering thresholds
  */
 export async function snapshotFaceParams(videoElement, frameNumber) {
-  const fl = await getLandmarker()
+  const fl = await getSharedLandmarker()
   const fps = 30
   const timeMs = (frameNumber / fps) * 1000
 
@@ -106,7 +86,7 @@ export async function faceLandmarkerDetect(videoElement, frameRange, settings) {
       }
     }
 
-    const fl = await getLandmarker()
+    const fl = await getSharedLandmarker()
     const [startFrame, endFrame] = frameRange
     const fps = 30
     const rejectedRanges = []
