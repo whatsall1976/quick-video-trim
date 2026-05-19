@@ -65,8 +65,8 @@ export function useVideoPlayback(videoRef) {
     const vid = videoRef?.current
     if (!vid || !video.fps) return
     const targetTime = playback.currentFrame / video.fps
-    // Keep video element in sync with current frame
-    if (Math.abs(vid.currentTime - targetTime) > 0.001) {
+    // Only seek if significantly out of sync (> 3 frames) to avoid hammering decoder
+    if (Math.abs(vid.currentTime - targetTime) > 0.1) {
       vid.currentTime = targetTime
     }
   }, [playback.currentFrame, playback.isPlaying, video.fps, videoRef])
