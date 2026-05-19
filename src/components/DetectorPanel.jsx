@@ -228,17 +228,15 @@ export default function DetectorPanel({ videoRef, onClose }) {
                 <div style={{ fontWeight: 500, color: snapshotResult.detectors.dissolve.isDissolve ? 'var(--danger)' : 'var(--accent)' }}>
                   Dissolve: {snapshotResult.detectors.dissolve.isDissolve ? 'YES - DISSOLVE DETECTED' : 'No'}
                 </div>
-                <div style={{ paddingLeft: 8 }}>
-                  reconError: {snapshotResult.detectors.dissolve.reconError} (lower = more dissolve-like)
-                </div>
-                <div style={{ paddingLeft: 8 }}>
-                  sceneChange: {snapshotResult.detectors.dissolve.sceneChange} (higher = more different scenes)
-                </div>
-                {snapshotResult.detectors.dissolve.frameRange && (
-                  <div style={{ paddingLeft: 8, color: 'var(--text-muted)' }}>
-                    compared frames {snapshotResult.detectors.dissolve.frameRange[0]} and {snapshotResult.detectors.dissolve.frameRange[1]}
+                {(snapshotResult.detectors.dissolve.tests || []).map((t, i) => (
+                  <div key={i} style={{
+                    paddingLeft: 8,
+                    color: t.isDissolve ? 'var(--danger)' : 'var(--text-secondary)',
+                    fontWeight: t.isDissolve ? 500 : 400,
+                  }}>
+                    gap={t.gap} [{t.frameRange[0]}-{t.frameRange[1]}]: reconErr={t.reconError} sceneΔ={t.sceneChange} {t.isDissolve ? 'DISSOLVE' : ''}
                   </div>
-                )}
+                ))}
               </div>
             )}
             {snapshotResult.detectors.dissolve?.error && (

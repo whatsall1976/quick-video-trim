@@ -71,17 +71,9 @@ function blendReconstructionError(frameA, frameB, midFrame) {
 
 /**
  * Snapshot: check if current frame is in a dissolve
+ * Tests multiple gap sizes to handle dissolves of different lengths
  */
 export async function snapshotDissolve(videoElement, frameNumber, fps, totalFrames) {
-  const d = Math.round(fps * 0.5) // half-second gap
-  const prevFrame = Math.max(0, frameNumber - d)
-  const nextFrame = Math.min(totalFrames - 1, frameNumber + d)
-
-  if (nextFrame - prevFrame < d) {
-    return { isDissolve: false, error: 1.0, alpha: 0, note: 'Too close to video boundary' }
-  }
-
-  // Downscale for speed
   const w = 160
   const h = 90
   const canvas = document.createElement('canvas')
@@ -89,29 +81,47 @@ export async function snapshotDissolve(videoElement, frameNumber, fps, totalFram
   canvas.height = h
   const ctx = canvas.getContext('2d')
 
-  const fA = await grabFrame(videoElement, prevFrame, fps, canvas, ctx, w, h)
+  // Test multiple gap sizes: 5, 10, 15, 30, 45 frames
+  const gaps = [5, 10, 15, 30, 45]
+  const tests = []
+  let bestDissolve = false
+
+  // Grab the mid frame once
   const fMid = await grabFrame(videoElement, frameNumber, fps, canvas, ctx, w, h)
-  const fB = await grabFrame(videoElement, nextFrame, fps, canvas, ctx, w, h)
 
-  const reconError = blendReconstructionError(fA, fB, fMid)
+  for (const d of gaps) {
+    const prevFrame = Math.max(0, frameNumber - d)
+    const nextFrame = Math.min(totalFrames - 1, frameNumber + d)
+    if (nextFrame - prevFrame < d) continue
 
-  // Also compute direct difference between A and B to confirm scene change
-  let diffAB = 0
-  const a = fA.data, b = fB.data
-  for (let i = 0; i < a.length; i += 4) {
-    for (let c = 0; c < 3; c++) {
-      const d2 = a[i + c] - b[i + c]
-      diffAB += d2 * d2
+    const fA = await grabFrame(videoElement, prevFrame, fps, canvas, ctx, w, h)
+    const fB = await grabFrame(videoElement, nextFrame, fps, canvas, ctx, w, h)
+
+    const reconError = blendReconstructionError(fA, fB, fMid)
+
+    let diffAB = 0
+    const a = fA.data, b = fB.data
+    for (let i = 0; i < a.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        const dd = a[i + c] - b[i + c]
+        diffAB += dd * dd
+      }
     }
-  }
-  const rmseAB = Math.sqrt(diffAB / (a.length * 3 / 4)) / 255
+    const rmseAB = Math.sqrt(diffAB / (a.length * 3 / 4)) / 255
 
-  return {
-    reconError: Math.round(reconError * 1000) / 1000,
-    sceneChange: Math.round(rmseAB * 1000) / 1000,
-    isDissolve: reconError < 0.06 && rmseAB > 0.08,
-    frameRange: [prevFrame, nextFrame],
+    const isDissolve = reconError < 0.06 && rmseAB > 0.05
+    if (isDissolve) bestDissolve = true
+
+    tests.push({
+      gap: d,
+      frameRange: [prevFrame, nextFrame],
+      reconError: Math.round(reconError * 1000) / 1000,
+      sceneChange: Math.round(rmseAB * 1000) / 1000,
+      isDissolve,
+    })
   }
+
+  return { isDissolve: bestDissolve, tests }
 }
 
 /**
