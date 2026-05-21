@@ -24,6 +24,63 @@ async function getFFmpeg() {
  * @param {function} onProgress ({ progress, message }) => void
  */
 export async function exportVideo(videoFile, trimSegments, videoMeta, audioMode, onProgress) {
+  const nativeResult = await exportVideoNative(videoFile, trimSegments, videoMeta, audioMode, onProgress)
+  if (nativeResult) return nativeResult
+  return exportVideoWasm(videoFile, trimSegments, videoMeta, audioMode, onProgress)
+}
+
+async function exportVideoNative(videoFile, trimSegments, videoMeta, audioMode, onProgress) {
+  if (!window.location.protocol.startsWith('http')) return null
+
+  const meta = encodeURIComponent(JSON.stringify({ trimSegments, videoMeta, audioMode }))
+  onProgress?.({ progress: 0.03, message: 'Sending video to native FFmpeg…' })
+
+  let renderTimer = null
+  try {
+    renderTimer = setTimeout(() => {
+      onProgress?.({ progress: 0.2, message: 'Native FFmpeg rendering…' })
+    }, 800)
+
+    const response = await fetch('/api/export-native', {
+      method: 'POST',
+      headers: {
+        'Content-Type': videoFile.type || 'application/octet-stream',
+        'X-Export-Meta': meta,
+      },
+      body: videoFile,
+    })
+
+    if (response.status === 404) {
+      return null
+    }
+
+    if (!response.ok) {
+      const detail = await readErrorResponse(response)
+      throw new Error(detail || `Native FFmpeg export failed with HTTP ${response.status}`)
+    }
+
+    if (response.headers.get('X-Export-Engine') !== 'native-ffmpeg') {
+      return null
+    }
+
+    onProgress?.({ progress: 0.9, message: 'Reading native FFmpeg output…' })
+    const videoBlob = await response.blob()
+    const jsonBlob = createProjectJsonBlob(videoFile, trimSegments, videoMeta, audioMode)
+    onProgress?.({ progress: 1, message: 'Done!' })
+    return { videoBlob, jsonBlob }
+  } catch (err) {
+    if (isNativeEndpointUnavailable(err)) {
+      console.warn('[export] Native FFmpeg unavailable; falling back to FFmpeg.wasm.', err)
+      onProgress?.({ progress: 0.02, message: 'Native FFmpeg unavailable; falling back to browser export…' })
+      return null
+    }
+    throw err
+  } finally {
+    if (renderTimer) clearTimeout(renderTimer)
+  }
+}
+
+async function exportVideoWasm(videoFile, trimSegments, videoMeta, audioMode, onProgress) {
   const { fps } = videoMeta
   const ff = await getFFmpeg()
   const runId = ++exportRunId
@@ -81,6 +138,19 @@ export async function exportVideo(videoFile, trimSegments, videoMeta, audioMode,
     await safeDelete(ff, inputPath)
     await safeDelete(ff, outputPath)
   }
+}
+
+async function readErrorResponse(response) {
+  const contentType = response.headers.get('Content-Type') || ''
+  if (contentType.includes('application/json')) {
+    const body = await response.json().catch(() => null)
+    return body?.error
+  }
+  return response.text().catch(() => '')
+}
+
+function isNativeEndpointUnavailable(err) {
+  return err instanceof TypeError || /failed to fetch|load failed|network/i.test(err.message || '')
 }
 
 function buildExportArgs(inputPath, outputPath, kept, videoMeta, audioMode) {
